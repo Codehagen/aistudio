@@ -1,90 +1,72 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { IconLoader } from "@tabler/icons-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useActionState } from "react"
+import { toast } from "sonner"
+import { IconLoader } from "@tabler/icons-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/ui/card"
+import { completeOnboarding } from "@/lib/actions"
 
 interface OnboardingFormProps {
-  initialName: string;
-  initialEmail: string;
-  initialWorkspaceName: string;
+  initialName: string
+  initialEmail: string
+  initialWorkspaceName: string
 }
+
+type FormState = {
+  error?: string
+} | null
 
 export function OnboardingForm({
   initialName,
   initialEmail,
   initialWorkspaceName,
 }: OnboardingFormProps) {
-  const router = useRouter();
-  const [isLoading, setIsLoading] = useState(false);
+  const [state, formAction, isPending] = useActionState<FormState, FormData>(
+    async (_prevState, formData) => {
+      const name = formData.get("name") as string
+      const workspaceName = formData.get("workspaceName") as string
+      const organizationNumber = formData.get("organizationNumber") as string
 
-  const [name, setName] = useState(initialName);
-  const [workspaceName, setWorkspaceName] = useState(initialWorkspaceName);
-  const [organizationNumber, setOrganizationNumber] = useState("");
-  const [contactEmail, setContactEmail] = useState(initialEmail);
-  const [contactPerson, setContactPerson] = useState(initialName);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!name.trim()) {
-      toast.error("Please enter your name");
-      return;
-    }
-
-    if (!workspaceName.trim()) {
-      toast.error("Please enter a workspace name");
-      return;
-    }
-
-    // Validate Norwegian org number format if provided (9 digits)
-    if (organizationNumber && !/^\d{9}$/.test(organizationNumber)) {
-      toast.error("Organization number must be 9 digits");
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      const response = await fetch("/api/onboarding", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          workspaceName,
-          organizationNumber: organizationNumber || null,
-          contactEmail: contactEmail || null,
-          contactPerson: contactPerson || null,
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to complete onboarding");
+      // Client-side validation
+      if (!name.trim()) {
+        return { error: "Please enter your name" }
       }
 
-      toast.success("Welcome to AI Studio!");
-      router.push("/dashboard");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Something went wrong"
-      );
-      setIsLoading(false);
-    }
-  };
+      if (!workspaceName.trim()) {
+        return { error: "Please enter a workspace name" }
+      }
+
+      // Validate Norwegian org number format if provided (9 digits)
+      if (organizationNumber && !/^\d{9}$/.test(organizationNumber)) {
+        return { error: "Organization number must be 9 digits" }
+      }
+
+      try {
+        // Server action will redirect on success
+        await completeOnboarding(formData)
+        return null
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : "Something went wrong",
+        }
+      }
+    },
+    null
+  )
+
+  // Show toast on error
+  if (state?.error) {
+    toast.error(state.error)
+  }
 
   return (
     <Card>
@@ -95,16 +77,16 @@ export function OnboardingForm({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form action={formAction} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">Your name</Label>
             <Input
               id="name"
+              name="name"
               type="text"
               placeholder="John Doe"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={isLoading}
+              defaultValue={initialName}
+              disabled={isPending}
             />
           </div>
 
@@ -112,11 +94,11 @@ export function OnboardingForm({
             <Label htmlFor="workspaceName">Company / Workspace name</Label>
             <Input
               id="workspaceName"
+              name="workspaceName"
               type="text"
               placeholder="Acme Real Estate"
-              value={workspaceName}
-              onChange={(e) => setWorkspaceName(e.target.value)}
-              disabled={isLoading}
+              defaultValue={initialWorkspaceName}
+              disabled={isPending}
             />
           </div>
 
@@ -127,14 +109,11 @@ export function OnboardingForm({
             </Label>
             <Input
               id="organizationNumber"
+              name="organizationNumber"
               type="text"
               placeholder="123456789"
-              value={organizationNumber}
-              onChange={(e) =>
-                setOrganizationNumber(e.target.value.replace(/\D/g, ""))
-              }
               maxLength={9}
-              disabled={isLoading}
+              disabled={isPending}
             />
             <p className="text-xs text-muted-foreground">
               Norwegian organization number (9 digits)
@@ -148,11 +127,11 @@ export function OnboardingForm({
             </Label>
             <Input
               id="contactEmail"
+              name="contactEmail"
               type="email"
               placeholder="contact@company.com"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              disabled={isLoading}
+              defaultValue={initialEmail}
+              disabled={isPending}
             />
           </div>
 
@@ -163,19 +142,19 @@ export function OnboardingForm({
             </Label>
             <Input
               id="contactPerson"
+              name="contactPerson"
               type="text"
               placeholder="John Doe"
-              value={contactPerson}
-              onChange={(e) => setContactPerson(e.target.value)}
-              disabled={isLoading}
+              defaultValue={initialName}
+              disabled={isPending}
             />
           </div>
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? (
+          <Button type="submit" className="w-full" disabled={isPending}>
+            {isPending ? (
               <>
                 <IconLoader className="mr-2 size-4 animate-spin" />
-                Saving...
+                Saving…
               </>
             ) : (
               "Continue to dashboard"
@@ -184,5 +163,5 @@ export function OnboardingForm({
         </form>
       </CardContent>
     </Card>
-  );
+  )
 }

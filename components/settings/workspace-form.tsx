@@ -1,7 +1,6 @@
 "use client"
 
-import * as React from "react"
-import { useState } from "react"
+import { useActionState, useEffect, useRef } from "react"
 import { toast } from "sonner"
 import {
   IconBuilding,
@@ -18,55 +17,47 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { Workspace } from "@/lib/db/schema"
+import { updateWorkspaceSettings, type WorkspaceActionResult } from "@/lib/actions"
 
 interface WorkspaceFormProps {
   workspace: Workspace
 }
 
+type FormState = WorkspaceActionResult | null
+
 export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
-  const [formData, setFormData] = useState({
-    name: workspace.name,
-    organizationNumber: workspace.organizationNumber || "",
-    contactEmail: workspace.contactEmail || "",
-    contactPerson: workspace.contactPerson || "",
-  })
-  const [isSaving, setIsSaving] = useState(false)
-  const [hasChanges, setHasChanges] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
+  const lastResultRef = useRef<FormState>(null)
 
-  const handleChange = (field: keyof typeof formData, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
-    setHasChanges(true)
-  }
+  const [state, formAction, isPending] = useActionState<FormState, FormData>(
+    async (_prevState, formData) => {
+      const name = formData.get("name") as string
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSaving(true)
-
-    try {
-      const response = await fetch("/api/workspace", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || "Failed to save changes")
+      // Client-side validation
+      if (!name.trim()) {
+        return { success: false, error: "Workspace name is required" }
       }
 
-      toast.success("Changes saved successfully")
-      setHasChanges(false)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save changes")
-    } finally {
-      setIsSaving(false)
+      const result = await updateWorkspaceSettings(formData)
+      return result
+    },
+    null
+  )
+
+  // Show toast when state changes (only once per state change)
+  useEffect(() => {
+    if (state && state !== lastResultRef.current) {
+      if (state.success) {
+        toast.success("Changes saved successfully")
+      } else if (state.error) {
+        toast.error(state.error)
+      }
+      lastResultRef.current = state
     }
-  }
+  }, [state])
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form ref={formRef} action={formAction} className="space-y-6">
       {/* Logo upload */}
       <div className="space-y-2">
         <Label className="text-sm font-medium">Workspace Logo</Label>
@@ -109,10 +100,11 @@ export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
             <IconBuilding className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="workspace-name"
-              value={formData.name}
-              onChange={(e) => handleChange("name", e.target.value)}
+              name="name"
+              defaultValue={workspace.name}
               placeholder="Your company name"
               className="pl-10"
+              disabled={isPending}
             />
           </div>
         </div>
@@ -126,10 +118,11 @@ export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
             <IconHash className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="org-number"
-              value={formData.organizationNumber}
-              onChange={(e) => handleChange("organizationNumber", e.target.value)}
+              name="organizationNumber"
+              defaultValue={workspace.organizationNumber || ""}
               placeholder="123456789"
               className="pl-10"
+              disabled={isPending}
             />
           </div>
         </div>
@@ -143,11 +136,12 @@ export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
             <IconMail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="contact-email"
+              name="contactEmail"
               type="email"
-              value={formData.contactEmail}
-              onChange={(e) => handleChange("contactEmail", e.target.value)}
+              defaultValue={workspace.contactEmail || ""}
               placeholder="contact@company.com"
               className="pl-10"
+              disabled={isPending}
             />
           </div>
         </div>
@@ -161,35 +155,30 @@ export function WorkspaceForm({ workspace }: WorkspaceFormProps) {
             <IconUser className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="contact-person"
-              value={formData.contactPerson}
-              onChange={(e) => handleChange("contactPerson", e.target.value)}
+              name="contactPerson"
+              defaultValue={workspace.contactPerson || ""}
               placeholder="Full name"
               className="pl-10"
+              disabled={isPending}
             />
           </div>
         </div>
       </div>
 
       {/* Save button */}
-      <div className="flex items-center justify-between border-t pt-4">
-        <p className="text-sm text-muted-foreground">
-          {hasChanges ? "You have unsaved changes" : "All changes saved"}
-        </p>
+      <div className="flex items-center justify-end border-t pt-4">
         <Button
           type="submit"
-          disabled={!hasChanges || isSaving}
-          className={cn(
-            "gap-2 transition-all",
-            hasChanges && "shadow-sm"
-          )}
+          disabled={isPending}
+          className={cn("gap-2 transition-all shadow-sm")}
           style={{
-            backgroundColor: hasChanges ? "var(--accent-teal)" : undefined,
+            backgroundColor: "var(--accent-teal)",
           }}
         >
-          {isSaving ? (
+          {isPending ? (
             <>
               <IconLoader2 className="h-4 w-4 animate-spin" />
-              Saving...
+              Saving…
             </>
           ) : (
             <>
