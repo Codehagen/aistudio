@@ -135,7 +135,7 @@ function generateInvoiceHistory(): InvoiceRecord[] {
 
   // Generate 20-30 historical invoices
   const invoiceCount = 25
-  let invoiceNumber = 10026 // Starting from our test invoices
+  const invoiceNumber = 10026 // Starting from our test invoices
 
   for (let i = 0; i < invoiceCount; i++) {
     const workspace = workspaces[Math.floor(random() * workspaces.length)]

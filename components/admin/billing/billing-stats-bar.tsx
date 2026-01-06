@@ -4,7 +4,7 @@ import {
   IconFileInvoice,
   IconClock,
   IconCheck,
-  IconCurrencyKrone,
+  IconReceipt,
 } from "@tabler/icons-react"
 import { type BillingStats, formatNOK } from "@/lib/mock/admin-billing"
 
@@ -118,7 +118,7 @@ export function BillingStatsBar({ stats }: BillingStatsBarProps) {
                 "color-mix(in oklch, var(--accent-violet) 15%, transparent)",
             }}
           >
-            <IconCurrencyKrone
+            <IconReceipt
               className="h-5 w-5"
               style={{ color: "var(--accent-violet)" }}
             />

@@ -6,7 +6,9 @@ import {
   IconFileInvoice,
   IconPhoto,
   IconBuilding,
+  IconLoader2,
 } from "@tabler/icons-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -18,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertTitle, AlertDescription, AlertAction } from "@/components/ui/alert"
 import {
   getUninvoicedProjects,
   getUninvoicedByWorkspace,
@@ -29,6 +32,8 @@ export function UninvoicedTable() {
   const projects = useMemo(() => getUninvoicedProjects(), [])
   const byWorkspace = useMemo(() => getUninvoicedByWorkspace(), [])
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isSendingBatch, setIsSendingBatch] = useState(false)
+  const [sendingSingleId, setSendingSingleId] = useState<string | null>(null)
 
   const allSelected =
     projects.length > 0 && selectedIds.size === projects.length
@@ -83,19 +88,36 @@ export function UninvoicedTable() {
       .reduce((sum, p) => sum + p.amount, 0)
   }, [projects, selectedIds])
 
-  const handleSendInvoices = () => {
+  const handleSendInvoices = async () => {
+    setIsSendingBatch(true)
+
+    // Simulate API call
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+
     // For now, just log what would be sent
     console.log("Sending invoices for:", selectedByWorkspace)
-    alert(
-      `Sender ${selectedIds.size} faktura(er) til ${selectedByWorkspace.size} kunde(r) for totalt ${formatNOK(selectedTotal)}`
-    )
+
+    toast.success("Fakturaer sendt", {
+      description: `${selectedIds.size} faktura(er) til ${selectedByWorkspace.size} kunde(r) for totalt ${formatNOK(selectedTotal)}`,
+    })
+
+    setSelectedIds(new Set())
+    setIsSendingBatch(false)
   }
 
-  const handleSendSingle = (project: UninvoicedProject) => {
+  const handleSendSingle = async (project: UninvoicedProject) => {
+    setSendingSingleId(project.id)
+
+    // Simulate API call
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+
     console.log("Sending single invoice for:", project)
-    alert(
-      `Sender faktura til ${project.workspaceName} for ${formatNOK(project.amount)}`
-    )
+
+    toast.success("Faktura sendt", {
+      description: `${project.workspaceName} – ${formatNOK(project.amount)}`,
+    })
+
+    setSendingSingleId(null)
   }
 
   if (projects.length === 0) {
@@ -123,28 +145,46 @@ export function UninvoicedTable() {
 
   return (
     <div className="space-y-4">
-      {/* Action Bar */}
-      {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium">
-              {selectedIds.size} valgt
-            </span>
-            <span className="text-sm text-muted-foreground">
-              ({selectedByWorkspace.size} kunde
-              {selectedByWorkspace.size !== 1 ? "r" : ""})
-            </span>
-            <Badge variant="outline" className="font-mono">
-              {formatNOK(selectedTotal)}
-            </Badge>
-          </div>
-          <Button onClick={handleSendInvoices} size="sm">
-            <IconSend className="mr-2 h-4 w-4" />
-            Send {selectedByWorkspace.size} faktura
-            {selectedByWorkspace.size !== 1 ? "er" : ""}
+      {/* Action Bar - Always visible to prevent layout shift */}
+      <Alert className="border-border bg-muted/30">
+        <IconFileInvoice className="h-4 w-4" />
+        {selectedIds.size > 0 ? (
+          <>
+            <AlertTitle className="flex items-center gap-2">
+              {selectedIds.size} prosjekt{selectedIds.size !== 1 ? "er" : ""} valgt
+              <Badge variant="outline" className="font-mono font-normal">
+                {formatNOK(selectedTotal)}
+              </Badge>
+            </AlertTitle>
+            <AlertDescription>
+              {selectedByWorkspace.size} faktura{selectedByWorkspace.size !== 1 ? "er" : ""} vil bli opprettet
+            </AlertDescription>
+          </>
+        ) : (
+          <>
+            <AlertTitle>Velg prosjekter</AlertTitle>
+            <AlertDescription>
+              Klikk på en rad eller bruk avkrysningsboksene for å velge prosjekter
+            </AlertDescription>
+          </>
+        )}
+        <AlertAction>
+          <Button
+            onClick={handleSendInvoices}
+            size="sm"
+            disabled={selectedIds.size === 0 || isSendingBatch}
+          >
+            {isSendingBatch ? (
+              <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <IconSend className="mr-2 h-4 w-4" />
+            )}
+            {selectedIds.size > 0
+              ? `Send ${selectedByWorkspace.size} faktura${selectedByWorkspace.size !== 1 ? "er" : ""}`
+              : "Send faktura"}
           </Button>
-        </div>
-      )}
+        </AlertAction>
+      </Alert>
 
       {/* Table */}
       <div className="rounded-xl bg-card shadow-xs ring-1 ring-foreground/10">
@@ -153,8 +193,7 @@ export function UninvoicedTable() {
             <TableRow>
               <TableHead className="w-12">
                 <Checkbox
-                  checked={allSelected}
-                  indeterminate={someSelected}
+                  checked={allSelected || (someSelected ? "indeterminate" : false)}
                   onCheckedChange={toggleAll}
                   aria-label="Velg alle"
                 />
@@ -171,9 +210,10 @@ export function UninvoicedTable() {
             {projects.map((project) => (
               <TableRow
                 key={project.id}
-                className={selectedIds.has(project.id) ? "bg-muted/30" : ""}
+                onClick={() => toggleProject(project.id)}
+                className={`cursor-pointer transition-colors hover:bg-muted/50 ${selectedIds.has(project.id) ? "bg-muted/30" : ""}`}
               >
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Checkbox
                     checked={selectedIds.has(project.id)}
                     onCheckedChange={() => toggleProject(project.id)}
@@ -232,14 +272,19 @@ export function UninvoicedTable() {
                     })}
                   </span>
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => handleSendSingle(project)}
+                    disabled={sendingSingleId === project.id}
                     className="h-8"
                   >
-                    <IconSend className="h-4 w-4" />
+                    {sendingSingleId === project.id ? (
+                      <IconLoader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <IconSend className="h-4 w-4" />
+                    )}
                   </Button>
                 </TableCell>
               </TableRow>

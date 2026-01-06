@@ -1,6 +1,7 @@
 import { ImpersonationProvider } from "@/hooks/use-impersonation"
 import { AdminHeader } from "@/components/admin/admin-header"
 import { ImpersonationBanner } from "@/components/admin/impersonation-banner"
+import { Toaster } from "@/components/ui/sonner"
 
 export default function AdminLayout({
   children,
@@ -13,6 +14,7 @@ export default function AdminLayout({
         <ImpersonationBanner />
         <AdminHeader />
         <main className="w-full py-6">{children}</main>
+        <Toaster />
       </div>
     </ImpersonationProvider>
   )
