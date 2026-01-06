@@ -4,9 +4,9 @@ import * as React from "react"
 import { useRouter } from "next/navigation"
 import {
   IconX,
-  IconBrush,
-  IconEraser,
   IconTrash,
+  IconPlus,
+  IconArrowBackUp,
   IconSparkles,
   IconLoader2,
 } from "@tabler/icons-react"
@@ -31,12 +31,15 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
   const fabricRef = React.useRef<InstanceType<typeof import("fabric").Canvas> | null>(null)
   const containerRef = React.useRef<HTMLDivElement>(null)
 
+  type EditMode = "remove" | "add"
   const [brushSize, setBrushSize] = React.useState(30)
-  const [isEraser, setIsEraser] = React.useState(false)
-  const [prompt, setPrompt] = React.useState("")
+  const [mode, setMode] = React.useState<EditMode>("remove")
+  const [objectToAdd, setObjectToAdd] = React.useState("")
   const [imageDimensions, setImageDimensions] = React.useState({ width: 0, height: 0 })
   const [isCanvasReady, setIsCanvasReady] = React.useState(false)
   const [imageLoaded, setImageLoaded] = React.useState(false)
+  const [canvasHistory, setCanvasHistory] = React.useState<string[]>([])
+  const [cursorPosition, setCursorPosition] = React.useState<{ x: number; y: number } | null>(null)
 
   // Use result image if available, otherwise original
   const sourceImageUrl = image.resultImageUrl || image.originalImageUrl
@@ -98,9 +101,9 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
         backgroundColor: "transparent",
       })
 
-      // Set up brush
+      // Set up brush with mode-based color
       const brush = new PencilBrush(canvas)
-      brush.color = "rgba(255, 255, 255, 0.7)"
+      brush.color = "rgba(239, 68, 68, 0.6)" // Red for remove (default mode)
       brush.width = brushSize
       canvas.freeDrawingBrush = brush
 
@@ -119,25 +122,86 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageLoaded, imageDimensions])
 
-  // Update brush settings
+  // Update brush settings based on mode
   React.useEffect(() => {
-    if (!fabricRef.current?.freeDrawingBrush) return
+    if (!fabricRef.current?.freeDrawingBrush || !isCanvasReady) return
 
     fabricRef.current.freeDrawingBrush.width = brushSize
-    fabricRef.current.freeDrawingBrush.color = isEraser
-      ? "rgba(0, 0, 0, 1)" // Eraser draws black (no edit area)
-      : "rgba(255, 255, 255, 0.7)" // Brush draws white (edit area)
-  }, [brushSize, isEraser])
+    // Visual feedback colors - red for remove, green for add
+    fabricRef.current.freeDrawingBrush.color = mode === "remove"
+      ? "rgba(239, 68, 68, 0.6)" // Red for remove
+      : "rgba(34, 197, 94, 0.6)" // Green for add
+  }, [brushSize, mode, isCanvasReady])
+
+  // Track canvas history for undo
+  React.useEffect(() => {
+    if (!fabricRef.current || !isCanvasReady) return
+
+    const canvas = fabricRef.current
+    const handlePathCreated = () => {
+      // Save current state before the new path for undo
+      const json = JSON.stringify(canvas.toJSON())
+      setCanvasHistory(prev => [...prev, json])
+    }
+
+    canvas.on("path:created", handlePathCreated)
+    return () => {
+      canvas.off("path:created", handlePathCreated)
+    }
+  }, [isCanvasReady])
+
+  const handleUndo = React.useCallback(() => {
+    if (!fabricRef.current || canvasHistory.length === 0) return
+
+    const canvas = fabricRef.current
+    // Remove the last state (current)
+    const newHistory = canvasHistory.slice(0, -1)
+
+    if (newHistory.length === 0) {
+      // No more history, clear canvas
+      canvas.clear()
+      canvas.backgroundColor = "transparent"
+      canvas.renderAll()
+    } else {
+      // Load previous state
+      const prevState = newHistory[newHistory.length - 1]
+      canvas.loadFromJSON(prevState, () => {
+        canvas.renderAll()
+      })
+    }
+
+    setCanvasHistory(newHistory)
+  }, [canvasHistory])
 
   const handleClear = React.useCallback(() => {
     if (!fabricRef.current) return
     fabricRef.current.clear()
     fabricRef.current.backgroundColor = "transparent"
     fabricRef.current.renderAll()
+    setCanvasHistory([])
+  }, [])
+
+  // Track cursor position for brush preview
+  const handleCanvasMouseMove = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setCursorPosition({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    })
+  }, [])
+
+  const handleCanvasMouseLeave = React.useCallback(() => {
+    setCursorPosition(null)
   }, [])
 
   const handleSubmit = React.useCallback(async () => {
-    if (!fabricRef.current || !prompt.trim()) return
+    if (!fabricRef.current) return
+    if (mode === "add" && !objectToAdd.trim()) return
+
+    // Auto-generate prompt based on mode
+    const generatedPrompt = mode === "remove"
+      ? "Remove the marked object and seamlessly fill with the surrounding background, matching the room's style and lighting"
+      : `Add a ${objectToAdd.trim()} in the marked area, matching the room's style and lighting`
 
     // Create a temporary canvas for the final mask
     const tempCanvas = document.createElement("canvas")
@@ -151,11 +215,28 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
     tempCtx.fillStyle = "black"
     tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height)
 
-    // Draw the fabric canvas content (white strokes become edit areas)
-    const fabricDataUrl = fabricRef.current.toDataURL({
+    // Draw the fabric canvas content - convert colored strokes to white for mask
+    const fabricCanvas = fabricRef.current
+    const originalPaths = fabricCanvas.getObjects("path")
+
+    // Temporarily change all path colors to white for the mask
+    originalPaths.forEach((path) => {
+      (path as { stroke?: string }).stroke = "white"
+    })
+    fabricCanvas.renderAll()
+
+    const fabricDataUrl = fabricCanvas.toDataURL({
       format: "png",
       multiplier: 1,
     })
+
+    // Restore original colors
+    originalPaths.forEach((path) => {
+      (path as { stroke?: string }).stroke = mode === "remove"
+        ? "rgba(239, 68, 68, 0.6)"
+        : "rgba(34, 197, 94, 0.6)"
+    })
+    fabricCanvas.renderAll()
 
     const maskImg = new window.Image()
     maskImg.onload = async () => {
@@ -165,7 +246,7 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
       const maskDataUrl = tempCanvas.toDataURL("image/png")
 
       // Call inpaint API
-      const success = await inpaint(image.id, maskDataUrl, prompt.trim())
+      const success = await inpaint(image.id, maskDataUrl, generatedPrompt)
 
       if (success) {
         router.refresh()
@@ -173,7 +254,7 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
       }
     }
     maskImg.src = fabricDataUrl
-  }, [prompt, imageDimensions, image.id, inpaint, router, onClose])
+  }, [mode, objectToAdd, imageDimensions, image.id, inpaint, router, onClose])
 
   // Handle escape key
   React.useEffect(() => {
@@ -193,31 +274,31 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
         <div className="flex items-center gap-4">
           <h2 className="text-lg font-semibold text-white">Edit Image</h2>
 
-          {/* Brush/Eraser toggle */}
+          {/* Mode selector */}
           <div className="flex items-center gap-1 rounded-lg bg-white/10 p-1">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsEraser(false)}
+              onClick={() => setMode("remove")}
               className={cn(
                 "gap-1.5 text-white hover:bg-white/20 hover:text-white",
-                !isEraser && "bg-white/20"
+                mode === "remove" && "bg-red-500/30"
               )}
             >
-              <IconBrush className="h-4 w-4" />
-              Brush
+              <IconTrash className="h-4 w-4" />
+              Remove Object
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsEraser(true)}
+              onClick={() => setMode("add")}
               className={cn(
                 "gap-1.5 text-white hover:bg-white/20 hover:text-white",
-                isEraser && "bg-white/20"
+                mode === "add" && "bg-green-500/30"
               )}
             >
-              <IconEraser className="h-4 w-4" />
-              Eraser
+              <IconPlus className="h-4 w-4" />
+              Add Object
             </Button>
           </div>
 
@@ -235,14 +316,25 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
             <span className="w-8 text-sm tabular-nums text-white/70">{brushSize}</span>
           </div>
 
+          {/* Undo button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleUndo}
+            disabled={canvasHistory.length === 0}
+            className="gap-1.5 text-white hover:bg-white/20 hover:text-white disabled:opacity-40"
+          >
+            <IconArrowBackUp className="h-4 w-4" />
+            Undo
+          </Button>
+
           {/* Clear button */}
           <Button
             variant="ghost"
             size="sm"
             onClick={handleClear}
-            className="gap-1.5 text-white hover:bg-white/20 hover:text-white"
+            className="gap-1.5 text-white/70 hover:bg-white/20 hover:text-white"
           >
-            <IconTrash className="h-4 w-4" />
             Clear
           </Button>
         </div>
@@ -280,6 +372,8 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
               width: imageDimensions.width,
               height: imageDimensions.height,
             }}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseLeave={handleCanvasMouseLeave}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -292,8 +386,23 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
             <canvas
               ref={canvasRef}
               className="absolute inset-0 rounded-lg"
-              style={{ cursor: isCanvasReady ? "crosshair" : "wait" }}
+              style={{ cursor: "none" }}
             />
+
+            {/* Brush size preview cursor */}
+            {isCanvasReady && cursorPosition && (
+              <div
+                className="pointer-events-none absolute rounded-full border-2"
+                style={{
+                  width: brushSize,
+                  height: brushSize,
+                  left: cursorPosition.x - brushSize / 2,
+                  top: cursorPosition.y - brushSize / 2,
+                  borderColor: mode === "remove" ? "rgb(239, 68, 68)" : "rgb(34, 197, 94)",
+                  backgroundColor: mode === "remove" ? "rgba(239, 68, 68, 0.2)" : "rgba(34, 197, 94, 0.2)",
+                }}
+              />
+            )}
 
             {/* Canvas loading indicator */}
             {!isCanvasReady && (
@@ -305,21 +414,27 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
         )}
       </div>
 
-      {/* Footer / Prompt input */}
+      {/* Footer */}
       <div className="border-t border-white/10 bg-black/50 px-4 py-4 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Input
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe what should appear in the masked area..."
-            className="flex-1 border-white/20 bg-white/10 text-white placeholder:text-white/50"
-            disabled={isProcessing}
-          />
+          {mode === "add" ? (
+            <Input
+              value={objectToAdd}
+              onChange={(e) => setObjectToAdd(e.target.value)}
+              placeholder="What do you want to add? (e.g., chair, painting, plant)"
+              className="flex-1 border-white/20 bg-white/10 text-white placeholder:text-white/50"
+              disabled={isProcessing}
+            />
+          ) : (
+            <p className="flex-1 text-white/70">
+              Draw on the object you want to remove
+            </p>
+          )}
           <Button
             onClick={handleSubmit}
-            disabled={!prompt.trim() || isProcessing || !isCanvasReady}
+            disabled={isProcessing || !isCanvasReady || (mode === "add" && !objectToAdd.trim())}
             className="gap-2 min-w-[120px]"
-            style={{ backgroundColor: "var(--accent-teal)" }}
+            style={{ backgroundColor: mode === "remove" ? "rgb(239, 68, 68)" : "rgb(34, 197, 94)" }}
           >
             {isProcessing ? (
               <>
@@ -329,7 +444,7 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
             ) : (
               <>
                 <IconSparkles className="h-4 w-4" />
-                Apply Edit
+                {mode === "remove" ? "Remove" : "Add"}
               </>
             )}
           </Button>
@@ -340,7 +455,9 @@ export function ImageMaskEditor({ image, onClose }: ImageMaskEditorProps) {
         )}
 
         <p className="mt-2 text-center text-xs text-white/50">
-          Draw on the areas you want to edit, then describe what should appear there
+          {mode === "remove"
+            ? "Draw on the object you want to remove. The AI will fill it with the background."
+            : "Draw where you want to add the object, then specify what to add above."}
         </p>
       </div>
     </div>

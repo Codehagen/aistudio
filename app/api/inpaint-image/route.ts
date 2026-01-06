@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { fal, FLUX_FILL_PRO, type FluxFillOutput } from "@/lib/fal"
 import { getImageGenerationById, updateImageGeneration, updateProjectCounts } from "@/lib/db/queries"
 import { uploadImage, getImagePath, getExtensionFromContentType } from "@/lib/supabase"
+import sharp from "sharp"
 
 export async function POST(request: NextRequest) {
   try {
@@ -34,22 +35,40 @@ export async function POST(request: NextRequest) {
         maskLength: maskDataUrl.length,
       })
 
-      // Fetch source image and upload to Fal.ai storage
+      // Fetch source image and get its dimensions
       const imageResponse = await fetch(sourceImageUrl)
       if (!imageResponse.ok) {
         throw new Error(`Failed to fetch source image: ${imageResponse.status}`)
       }
-      const imageBlob = await imageResponse.blob()
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer())
+      const imageMetadata = await sharp(imageBuffer).metadata()
+      const imageWidth = imageMetadata.width!
+      const imageHeight = imageMetadata.height!
+
+      console.log("Source image dimensions:", { width: imageWidth, height: imageHeight })
+
+      // Upload source image to Fal.ai storage
+      const imageBlob = new Blob([imageBuffer], { type: imageResponse.headers.get("content-type") || "image/jpeg" })
       const falImageUrl = await fal.storage.upload(
         new File([imageBlob], "input.jpg", { type: imageBlob.type })
       )
 
       console.log("Uploaded image to Fal.ai storage:", falImageUrl)
 
-      // Convert base64 mask data URL to blob and upload to Fal.ai storage
+      // Convert base64 mask data URL to buffer
       const maskBase64 = maskDataUrl.split(",")[1]
-      const maskBinary = Buffer.from(maskBase64, "base64")
-      const maskBlob = new Blob([maskBinary], { type: "image/png" })
+      const maskBuffer = Buffer.from(maskBase64, "base64")
+
+      // Resize mask to match source image dimensions
+      const resizedMaskBuffer = await sharp(maskBuffer)
+        .resize(imageWidth, imageHeight, { fit: "fill" })
+        .png()
+        .toBuffer()
+
+      console.log("Resized mask to match source image dimensions")
+
+      // Upload resized mask to Fal.ai storage
+      const maskBlob = new Blob([resizedMaskBuffer], { type: "image/png" })
       const falMaskUrl = await fal.storage.upload(
         new File([maskBlob], "mask.png", { type: "image/png" })
       )
@@ -119,6 +138,11 @@ export async function POST(request: NextRequest) {
       })
     } catch (processingError) {
       console.error("Inpainting error:", processingError)
+
+      // Log full error details for Fal.ai ApiError
+      if (processingError && typeof processingError === 'object' && 'body' in processingError) {
+        console.error("Fal.ai error body:", JSON.stringify((processingError as { body: unknown }).body, null, 2))
+      }
 
       return NextResponse.json(
         {
