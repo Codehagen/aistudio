@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils"
 import { AddImagesDialog } from "./add-images-dialog"
 import { ImageMaskEditor } from "./image-mask-editor"
 import { retryImageProcessing, deleteSelectedImages } from "@/lib/actions"
+import { toast } from "sonner"
 
 const statusConfig: Record<
   ProjectStatus,
@@ -609,10 +610,8 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null)
   const [retryingImageId, setRetryingImageId] = React.useState<string | null>(null)
   const [versionSelectorGroup, setVersionSelectorGroup] = React.useState<ImageGroup | null>(null)
-  const [isDownloading, setIsDownloading] = React.useState(false)
   const [selectedImageIds, setSelectedImageIds] = React.useState<Set<string>>(new Set())
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
-  const [isDeleting, setIsDeleting] = React.useState(false)
 
   const template = getTemplateById(project.styleTemplateId)
   const status = statusConfig[project.status as ProjectStatus] || statusConfig.pending
@@ -692,44 +691,52 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
   const handleDeleteSelected = async () => {
     if (selectedImageIds.size === 0) return
 
-    setIsDeleting(true)
-    try {
-      const result = await deleteSelectedImages(Array.from(selectedImageIds))
-      if (result.success) {
-        clearSelection()
-        router.refresh()
-      } else {
-        console.error("Delete failed:", result.error)
-      }
-    } catch (error) {
-      console.error("Delete failed:", error)
-    } finally {
-      setIsDeleting(false)
-      setDeleteDialogOpen(false)
-    }
+    const count = selectedImageIds.size
+    setDeleteDialogOpen(false)
+
+    const deletePromise = deleteSelectedImages(Array.from(selectedImageIds))
+
+    toast.promise(deletePromise, {
+      loading: `Deleting ${count} image${count !== 1 ? "s" : ""}…`,
+      success: (result) => {
+        if (result.success) {
+          clearSelection()
+          router.refresh()
+          return `Deleted ${result.data?.deletedCount || count} image${(result.data?.deletedCount || count) !== 1 ? "s" : ""}`
+        }
+        throw new Error(result.error || "Delete failed")
+      },
+      error: (err) => err?.message || "Failed to delete images",
+    })
   }
 
-  const handleDownload = async () => {
-    setIsDownloading(true)
-    try {
-      // If images are selected, download only those
-      const hasSelection = selectedImageIds.size > 0
-      const url = hasSelection
-        ? `/api/download/${project.id}?imageIds=${Array.from(selectedImageIds).join(",")}`
-        : `/api/download/${project.id}`
+  const handleDownload = () => {
+    const hasSelection = selectedImageIds.size > 0
+    const count = hasSelection ? selectedImageIds.size : completedImages.length
 
-      window.location.href = url
+    const downloadPromise = new Promise<void>((resolve, reject) => {
+      try {
+        const url = hasSelection
+          ? `/api/download/${project.id}?imageIds=${Array.from(selectedImageIds).join(",")}`
+          : `/api/download/${project.id}`
 
-      // Clear selection after download starts
-      if (hasSelection) {
-        setTimeout(() => clearSelection(), 500)
+        window.location.href = url
+
+        // Clear selection and resolve after download starts
+        setTimeout(() => {
+          if (hasSelection) clearSelection()
+          resolve()
+        }, 1000)
+      } catch (error) {
+        reject(error)
       }
-      // Reset after a short delay (download starts in background)
-      setTimeout(() => setIsDownloading(false), 2000)
-    } catch (error) {
-      console.error("Download failed:", error)
-      setIsDownloading(false)
-    }
+    })
+
+    toast.promise(downloadPromise, {
+      loading: `Preparing ${count} image${count !== 1 ? "s" : ""} for download…`,
+      success: "Download started",
+      error: "Download failed",
+    })
   }
 
   const handleDownloadSingle = async (image: ImageGeneration) => {
@@ -890,14 +897,9 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
                 className="gap-2"
                 style={{ backgroundColor: "var(--accent-teal)" }}
                 onClick={handleDownload}
-                disabled={isDownloading}
               >
-                {isDownloading ? (
-                  <IconLoader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <IconDownload className="h-4 w-4" />
-                )}
-                {isDownloading ? "Preparing…" : "Download All"}
+                <IconDownload className="h-4 w-4" />
+                Download All
               </Button>
             )}
           </div>
@@ -1081,15 +1083,10 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
               <Button
                 size="sm"
                 onClick={handleDownload}
-                disabled={isDownloading}
                 className="gap-1.5"
                 style={{ backgroundColor: "var(--accent-teal)" }}
               >
-                {isDownloading ? (
-                  <IconLoader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <IconDownload className="h-4 w-4" />
-                )}
+                <IconDownload className="h-4 w-4" />
                 Download
               </Button>
             </div>
@@ -1172,20 +1169,12 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteSelected}
-              disabled={isDeleting}
               className="bg-red-500 text-white hover:bg-red-600"
             >
-              {isDeleting ? (
-                <>
-                  <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deleting…
-                </>
-              ) : (
-                "Delete"
-              )}
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -27,6 +27,7 @@ export default function RootLayout({
     <html lang="en" className={outfit.variable}>
       <body
         className={`${outfit.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning={true}
       >
         <NuqsAdapter>{children}</NuqsAdapter>
       </body>
