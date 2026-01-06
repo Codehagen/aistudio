@@ -11,6 +11,7 @@ export {
   createSignedUploadUrls,
   recordUploadedImages,
   deleteProjectImage,
+  deleteSelectedImages,
   retryImageProcessing,
   updateImageStatus,
   regenerateImage,

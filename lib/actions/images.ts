@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers"
 import { revalidatePath } from "next/cache"
-import { eq } from "drizzle-orm"
+import { eq, or, inArray } from "drizzle-orm"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import {
@@ -269,6 +269,113 @@ export async function deleteProjectImage(
   } catch (error) {
     console.error("Failed to delete image:", error)
     return { success: false, error: "Failed to delete image" }
+  }
+}
+
+// Delete multiple selected images and their versions
+export async function deleteSelectedImages(
+  imageIds: string[]
+): Promise<ActionResult<{ deletedCount: number }>> {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  })
+
+  if (!session) {
+    return { success: false, error: "Unauthorized" }
+  }
+
+  if (imageIds.length === 0) {
+    return { success: false, error: "No images selected" }
+  }
+
+  // Get user's workspace
+  const currentUser = await db
+    .select()
+    .from(user)
+    .where(eq(user.id, session.user.id))
+    .limit(1)
+
+  if (!currentUser[0]?.workspaceId) {
+    return { success: false, error: "Workspace not found" }
+  }
+
+  const workspaceId = currentUser[0].workspaceId
+
+  try {
+    // Get all selected images
+    const selectedImages = await db
+      .select()
+      .from(imageGeneration)
+      .where(inArray(imageGeneration.id, imageIds))
+
+    // Verify all images belong to user's workspace
+    for (const img of selectedImages) {
+      if (img.workspaceId !== workspaceId) {
+        return { success: false, error: "Unauthorized access to image" }
+      }
+    }
+
+    // Find all root image IDs (either the image itself or its parentId)
+    const rootIds = new Set<string>()
+    for (const img of selectedImages) {
+      rootIds.add(img.parentId || img.id)
+    }
+
+    // Get all images that are part of any version chain (root + children)
+    const allVersionImages = await db
+      .select()
+      .from(imageGeneration)
+      .where(
+        or(
+          inArray(imageGeneration.id, Array.from(rootIds)),
+          inArray(imageGeneration.parentId, Array.from(rootIds))
+        )
+      )
+
+    // Track project IDs for updating counts later
+    const projectIds = new Set<string>()
+
+    // Delete files from Supabase storage
+    for (const img of allVersionImages) {
+      projectIds.add(img.projectId)
+
+      // Delete original image
+      const originalPath = extractPathFromUrl(img.originalImageUrl)
+      if (originalPath) {
+        await deleteImage(originalPath).catch(() => {
+          // Ignore errors if file doesn't exist
+        })
+      }
+
+      // Delete result image
+      if (img.resultImageUrl) {
+        const resultPath = extractPathFromUrl(img.resultImageUrl)
+        if (resultPath) {
+          await deleteImage(resultPath).catch(() => {
+            // Ignore errors if file doesn't exist
+          })
+        }
+      }
+    }
+
+    // Delete all version chain images from database
+    const imageIdsToDelete = allVersionImages.map((img) => img.id)
+    await db
+      .delete(imageGeneration)
+      .where(inArray(imageGeneration.id, imageIdsToDelete))
+
+    // Update project counts for all affected projects
+    for (const projectId of projectIds) {
+      await updateProjectCounts(projectId)
+      revalidatePath(`/dashboard/${projectId}`)
+    }
+
+    revalidatePath("/dashboard")
+
+    return { success: true, data: { deletedCount: allVersionImages.length } }
+  } catch (error) {
+    console.error("Failed to delete selected images:", error)
+    return { success: false, error: "Failed to delete images" }
   }
 }
 

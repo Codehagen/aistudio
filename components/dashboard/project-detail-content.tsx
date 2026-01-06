@@ -26,12 +26,22 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import type { Project, ImageGeneration, ProjectStatus } from "@/lib/db/schema"
 import { getTemplateById } from "@/lib/style-templates"
 import { cn } from "@/lib/utils"
 import { AddImagesDialog } from "./add-images-dialog"
 import { ImageMaskEditor } from "./image-mask-editor"
-import { retryImageProcessing } from "@/lib/actions"
+import { retryImageProcessing, deleteSelectedImages } from "@/lib/actions"
 
 const statusConfig: Record<
   ProjectStatus,
@@ -601,6 +611,8 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
   const [versionSelectorGroup, setVersionSelectorGroup] = React.useState<ImageGroup | null>(null)
   const [isDownloading, setIsDownloading] = React.useState(false)
   const [selectedImageIds, setSelectedImageIds] = React.useState<Set<string>>(new Set())
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
+  const [isDeleting, setIsDeleting] = React.useState(false)
 
   const template = getTemplateById(project.styleTemplateId)
   const status = statusConfig[project.status as ProjectStatus] || statusConfig.pending
@@ -676,6 +688,26 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
   const clearSelection = React.useCallback(() => {
     setSelectedImageIds(new Set())
   }, [])
+
+  const handleDeleteSelected = async () => {
+    if (selectedImageIds.size === 0) return
+
+    setIsDeleting(true)
+    try {
+      const result = await deleteSelectedImages(Array.from(selectedImageIds))
+      if (result.success) {
+        clearSelection()
+        router.refresh()
+      } else {
+        console.error("Delete failed:", result.error)
+      }
+    } catch (error) {
+      console.error("Delete failed:", error)
+    } finally {
+      setIsDeleting(false)
+      setDeleteDialogOpen(false)
+    }
+  }
 
   const handleDownload = async () => {
     setIsDownloading(true)
@@ -1039,6 +1071,7 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={() => setDeleteDialogOpen(true)}
                 className="gap-1.5 text-red-500 hover:bg-red-500/10 hover:text-red-500"
               >
                 <IconTrash className="h-4 w-4" />
@@ -1125,6 +1158,38 @@ export function ProjectDetailContent({ project, images }: ProjectDetailContentPr
           }}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selectedImageIds.size} image{selectedImageIds.size !== 1 ? "s" : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The selected images and all their
+              versions will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteSelected}
+              disabled={isDeleting}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              {isDeleting ? (
+                <>
+                  <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
