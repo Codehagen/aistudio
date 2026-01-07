@@ -210,3 +210,51 @@ export async function updateWorkspaceDetailsAction(
     return { success: false, error: "Failed to update workspace details" };
   }
 }
+
+// ============================================================================
+// Impersonation
+// ============================================================================
+
+export async function impersonateUserAction(
+  userId: string
+): Promise<ActionResult<{ redirectTo: string }>> {
+  const adminCheck = await verifySystemAdmin();
+  if (adminCheck.error) {
+    return { success: false, error: adminCheck.error };
+  }
+
+  try {
+    // Import auth dynamically to avoid circular deps
+    const { auth } = await import("@/lib/auth");
+    const { headers } = await import("next/headers");
+
+    // Use better-auth's impersonation API
+    await auth.api.impersonateUser({
+      body: { userId },
+      headers: await headers(),
+    });
+
+    return { success: true, data: { redirectTo: "/dashboard" } };
+  } catch (error) {
+    console.error("[admin:impersonateUser] Error:", error);
+    return { success: false, error: "Failed to impersonate user" };
+  }
+}
+
+export async function stopImpersonatingAction(): Promise<
+  ActionResult<{ redirectTo: string }>
+> {
+  try {
+    const { auth } = await import("@/lib/auth");
+    const { headers } = await import("next/headers");
+
+    await auth.api.stopImpersonating({
+      headers: await headers(),
+    });
+
+    return { success: true, data: { redirectTo: "/admin/workspaces" } };
+  } catch (error) {
+    console.error("[admin:stopImpersonating] Error:", error);
+    return { success: false, error: "Failed to stop impersonating" };
+  }
+}

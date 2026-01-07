@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin } from "better-auth/plugins";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
@@ -18,6 +19,11 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 7, // 7 days
     updateAge: 60 * 60 * 24, // 1 day (refresh session if older than this)
   },
+  plugins: [
+    admin({
+      impersonationSessionDuration: 60 * 60 * 24, // 1 day
+    }),
+  ],
   databaseHooks: {
     user: {
       create: {

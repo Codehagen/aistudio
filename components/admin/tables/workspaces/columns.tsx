@@ -1,5 +1,7 @@
 "use client";
 
+import { format } from "date-fns";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -119,6 +121,11 @@ const ImagesCell = memo(({ count }: { count: number }) => (
 ));
 ImagesCell.displayName = "ImagesCell";
 
+const VideosCell = memo(({ count }: { count: number }) => (
+  <span className="font-mono text-sm">{count.toLocaleString()}</span>
+));
+VideosCell.displayName = "VideosCell";
+
 const StatusCell = memo(({ status }: { status: WorkspaceStatus }) => (
   <Badge variant={statusVariantMap[status]}>{statusLabelMap[status]}</Badge>
 ));
@@ -140,11 +147,7 @@ const SpendCell = memo(({ amount }: { amount: number }) => (
 SpendCell.displayName = "SpendCell";
 
 const DateCell = memo(({ date }: { date: Date }) => {
-  const formatted = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
+  const formatted = format(date, "MMM d, yyyy");
   return <span className="text-sm text-muted-foreground">{formatted}</span>;
 });
 DateCell.displayName = "DateCell";
@@ -183,9 +186,11 @@ const ActionsCell = memo(
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => console.log("View", workspaceId)}>
-              <IconEye className="mr-2 h-4 w-4" />
-              View details
+            <DropdownMenuItem asChild>
+              <Link href={`/admin/workspaces/${workspaceId}`}>
+                <IconEye className="mr-2 h-4 w-4" />
+                View details
+              </Link>
             </DropdownMenuItem>
             {canImpersonate && (
               <DropdownMenuItem
@@ -272,6 +277,15 @@ export function createWorkspaceColumns(
       minSize: 70,
       maxSize: 100,
       cell: ({ row }) => <ImagesCell count={row.original.imagesGenerated} />,
+    },
+    {
+      id: "videosGenerated",
+      accessorKey: "videosGenerated",
+      header: "Videos",
+      size: 90,
+      minSize: 70,
+      maxSize: 100,
+      cell: ({ row }) => <VideosCell count={row.original.videosGenerated} />,
     },
     {
       id: "status",

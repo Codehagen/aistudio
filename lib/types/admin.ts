@@ -12,7 +12,10 @@ export interface AdminWorkspaceRow {
   plan: WorkspacePlan;
   memberCount: number;
   imagesGenerated: number;
+  videosGenerated: number;
+  videosCompleted: number;
   totalSpend: number;
+  totalVideoSpend: number;
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;

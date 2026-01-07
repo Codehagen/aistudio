@@ -76,6 +76,10 @@ export const session = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    // Admin impersonation tracking (better-auth admin plugin)
+    impersonatedBy: text("impersonated_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
   },
   (table) => [index("session_userId_idx").on(table.userId)]
 );

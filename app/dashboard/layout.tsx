@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { getUserWithWorkspace } from "@/lib/db/queries";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
+import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 
 export const metadata: Metadata = {
   title: "Dashboard | AI Studio",
@@ -34,6 +35,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-background">
+      <ImpersonationBanner />
       <DashboardHeader userLabel={session.user.email} />
 
       {/* Main content - full width with consistent padding */}
