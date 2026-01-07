@@ -97,8 +97,16 @@ cp .env.example .env.local
 # 4. Set up the database
 pnpm db:push
 
-# 5. Start development server
+# 5. Set up Trigger.dev (Background Jobs)
+# Get your TRIGGER_SECRET_KEY from https://cloud.trigger.dev
+# Add it to .env.local as TRIGGER_SECRET_KEY=tr_dev_xxxxxxxxxx
+
+# 6. Start development servers (run in separate terminals)
+# Terminal 1: Next.js dev server
 pnpm dev
+
+# Terminal 2: Trigger.dev dev server (for background jobs)
+pnpm trigger
 ```
 
 ### Manual Setup
@@ -130,16 +138,19 @@ pnpm db:push
 
 ### Useful Commands
 
-| Command            | Description                     |
-| ------------------ | ------------------------------- |
-| `pnpm dev`         | Start development server        |
-| `pnpm build`       | Production build                |
-| `pnpm start`       | Start production server         |
-| `pnpm lint`        | Run ESLint                      |
-| `pnpm db:push`     | Push schema changes to database |
-| `pnpm db:generate` | Generate Drizzle migrations     |
-| `pnpm db:studio`   | Open Drizzle Studio             |
-| `pnpm email`       | Preview email templates         |
+| Command            | Description                                        |
+| ------------------ | -------------------------------------------------- |
+| `pnpm dev`         | Start Next.js development server                   |
+| `pnpm trigger`     | Start Trigger.dev development server (background jobs) |
+| `pnpm build`       | Production build                                   |
+| `pnpm start`       | Start production server                            |
+| `pnpm lint`        | Run ESLint                                         |
+| `pnpm db:push`     | Push schema changes to database                    |
+| `pnpm db:generate` | Generate Drizzle migrations                        |
+| `pnpm db:studio`   | Open Drizzle Studio                                |
+| `pnpm email`       | Preview email templates                            |
+
+> **Important**: For local development, you need to run both `pnpm dev` (Next.js) and `pnpm trigger` (Trigger.dev) in separate terminals. The Trigger.dev server handles background task processing.
 
 ## Tech Stack
 
@@ -258,7 +269,15 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 # Email
 RESEND_API_KEY=your_resend_api_key
+
+# Trigger.dev (Background Jobs)
+TRIGGER_SECRET_KEY=tr_dev_xxxxxxxxxx
 ```
+
+> **Note**: For local development with Trigger.dev, you need to:
+> 1. Get your DEV secret key from the [API Keys page](https://cloud.trigger.dev) in your Trigger.dev project dashboard
+> 2. Add it to your `.env.local` file as `TRIGGER_SECRET_KEY`
+> 3. Run `pnpm trigger` in a separate terminal to start the Trigger.dev development server
 
 ## Contributing
 
