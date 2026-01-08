@@ -1,14 +1,12 @@
-"use client";
-
 import { LandingFooter } from "./landing-footer";
 import { LandingNav } from "./landing-nav";
 
-type LegalPageProps = {
+interface LegalPageProps {
   title: string;
   subtitle: string;
   lastUpdated: string;
   children: React.ReactNode;
-};
+}
 
 export function LegalPage({
   title,

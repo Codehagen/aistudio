@@ -1,5 +1,3 @@
-"use client";
-
 import { IconBrandLinkedin, IconBrandX } from "@tabler/icons-react";
 import Link from "next/link";
 
