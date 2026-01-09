@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { BlogPage } from "@/components/landing/blog-page";
 import { getAllCategories, getAllPosts } from "@/lib/blog";
 
@@ -12,5 +13,9 @@ export default function Blog() {
   const posts = getAllPosts();
   const categories = getAllCategories();
 
-  return <BlogPage categories={categories} posts={posts} />;
+  return (
+    <Suspense>
+      <BlogPage categories={categories} posts={posts} />
+    </Suspense>
+  );
 }

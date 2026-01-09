@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { DashboardContent } from "@/components/dashboard/dashboard-content";
 import { auth } from "@/lib/auth";
 import {
@@ -29,5 +30,9 @@ export default async function DashboardPage() {
   const projects = await getProjects(data.workspace.id);
   const stats = await getProjectStats(data.workspace.id);
 
-  return <DashboardContent projects={projects} stats={stats} />;
+  return (
+    <Suspense>
+      <DashboardContent projects={projects} stats={stats} />
+    </Suspense>
+  );
 }

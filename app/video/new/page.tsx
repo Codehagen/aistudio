@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { VideoCreationWizard } from "@/components/video/video-creation/video-creation-wizard";
 
 export default function NewVideoPage() {
-  return <VideoCreationWizard />;
+  return (
+    <Suspense>
+      <VideoCreationWizard />
+    </Suspense>
+  );
 }

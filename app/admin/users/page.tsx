@@ -1,4 +1,5 @@
 import { IconUsers } from "@tabler/icons-react";
+import { Suspense } from "react";
 import { UsersDataTable } from "@/components/admin/tables/users/data-table";
 import { getAdminUsers } from "@/lib/db/queries";
 import type {
@@ -67,10 +68,12 @@ export default async function AdminUsersPage({
 
       {/* Data Table */}
       <div className="stagger-1 animate-fade-in-up">
-        <UsersDataTable
-          initialData={initialData.data}
-          initialMeta={initialData.meta}
-        />
+        <Suspense>
+          <UsersDataTable
+            initialData={initialData.data}
+            initialMeta={initialData.meta}
+          />
+        </Suspense>
       </div>
     </div>
   );

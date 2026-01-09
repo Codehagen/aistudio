@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { HelpPage } from "@/components/landing/help-page";
 import {
   getAllHelpArticles,
@@ -26,11 +27,13 @@ export default function Help() {
   }
 
   return (
-    <HelpPage
-      articleCountByCategory={articleCountByCategory}
-      articles={articles}
-      categories={[...helpCategories]}
-      popularArticles={popularArticles}
-    />
+    <Suspense>
+      <HelpPage
+        articleCountByCategory={articleCountByCategory}
+        articles={articles}
+        categories={[...helpCategories]}
+        popularArticles={popularArticles}
+      />
+    </Suspense>
   );
 }

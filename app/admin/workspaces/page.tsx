@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { WorkspacesDataTable } from "@/components/admin/tables/workspaces/data-table";
 import { WorkspacesPageHeader } from "@/components/admin/workspaces-page-header";
 import { getAdminWorkspaces } from "@/lib/db/queries";
@@ -49,10 +50,12 @@ export default async function AdminWorkspacesPage({
 
       {/* Data Table */}
       <div className="stagger-1 animate-fade-in-up">
-        <WorkspacesDataTable
-          initialData={initialData.data}
-          initialMeta={initialData.meta}
-        />
+        <Suspense>
+          <WorkspacesDataTable
+            initialData={initialData.data}
+            initialMeta={initialData.meta}
+          />
+        </Suspense>
       </div>
     </div>
   );
