@@ -13,8 +13,7 @@
     "db:studio": "drizzle-kit studio",
     "email": "email dev --dir emails",
     "trigger": "pnpm dlx trigger.dev@latest dev",
-    "trigger:deploy": "pnpm dlx trigger.dev@latest deploy",
-    "prepare": "husky"
+    "trigger:deploy": "pnpm dlx trigger.dev@latest deploy"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
