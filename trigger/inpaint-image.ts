@@ -6,11 +6,11 @@ import {
   updateProjectCounts,
 } from "@/lib/db/queries";
 import {
-  FLUX_FILL_PRO,
-  type FluxFillOutput,
   fal,
   NANO_BANANA_PRO_EDIT,
   type NanoBananaProOutput,
+  QWEN_IMAGE_EDIT_INPAINT,
+  type QwenInpaintOutput,
 } from "@/lib/fal";
 import {
   getExtensionFromContentType,
@@ -129,7 +129,7 @@ export const inpaintImageTask = task({
       } satisfies InpaintImageStatus);
 
       if (mode === "remove") {
-        // REMOVE MODE: Use FLUX Fill Pro (inpainting)
+        // REMOVE MODE: Use Qwen Image Edit Inpaint (inpainting)
         if (!maskDataUrl) {
           throw new Error("Mask is required for remove mode");
         }
@@ -156,23 +156,23 @@ export const inpaintImageTask = task({
 
         logger.info("Uploaded mask to Fal.ai storage", { falMaskUrl });
 
-        // Call FLUX Fill Pro API
-        const result = (await fal.subscribe(FLUX_FILL_PRO, {
+        // Call Qwen Image Edit Inpaint API
+        const result = (await fal.subscribe(QWEN_IMAGE_EDIT_INPAINT, {
           input: {
+            prompt,
             image_url: falImageUrl,
             mask_url: falMaskUrl,
-            prompt,
             output_format: "jpeg",
           },
-        })) as unknown as FluxFillOutput;
+        })) as unknown as QwenInpaintOutput;
 
-        logger.info("FLUX Fill result received");
+        logger.info("Qwen Inpaint result received");
 
         // Check for result - handle both direct and wrapped response
-        const output = (result as { data?: FluxFillOutput }).data || result;
+        const output = (result as { data?: QwenInpaintOutput }).data || result;
         if (!output.images?.[0]?.url) {
           logger.error("No images in response", { result });
-          throw new Error("No image returned from FLUX Fill");
+          throw new Error("No image returned from Qwen Inpaint");
         }
 
         resultImageUrl = output.images[0].url;
@@ -247,7 +247,8 @@ export const inpaintImageTask = task({
           editedFrom: imageId,
           editedAt: new Date().toISOString(),
           editMode: mode,
-          model: mode === "remove" ? "flux-fill-pro" : "nano-banana-pro",
+          model:
+            mode === "remove" ? "qwen-image-edit-inpaint" : "nano-banana-pro",
         },
       });
 

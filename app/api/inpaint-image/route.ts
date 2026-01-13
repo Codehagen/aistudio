@@ -6,7 +6,7 @@ import {
   getImageGenerationById,
   updateProjectCounts,
 } from "@/lib/db/queries";
-import { FLUX_FILL_PRO, fal, NANO_BANANA_PRO_EDIT } from "@/lib/fal";
+import { fal, NANO_BANANA_PRO_EDIT, QWEN_IMAGE_EDIT_INPAINT } from "@/lib/fal";
 import {
   getExtensionFromContentType,
   getImagePath,
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
       let contentType: string;
 
       if (mode === "remove") {
-        // REMOVE MODE: Use FLUX Fill Pro (inpainting)
+        // REMOVE MODE: Use Qwen Image Edit Inpaint (inpainting)
         // Convert base64 mask data URL to buffer
         if (!maskDataUrl) {
           return NextResponse.json(
@@ -130,23 +130,23 @@ export async function POST(request: NextRequest) {
 
         console.log("Uploaded mask to Fal.ai storage:", falMaskUrl);
 
-        // Call FLUX Fill Pro API
-        const result = await fal.subscribe(FLUX_FILL_PRO, {
+        // Call Qwen Image Edit Inpaint API
+        const result = await fal.subscribe(QWEN_IMAGE_EDIT_INPAINT, {
           input: {
+            prompt,
             image_url: falImageUrl,
             mask_url: falMaskUrl,
-            prompt,
             output_format: "jpeg",
           },
         });
 
-        console.log("FLUX Fill result:", JSON.stringify(result, null, 2));
+        console.log("Qwen Inpaint result:", JSON.stringify(result, null, 2));
 
         // Extract output from Result type (has data property)
         const output = result.data;
         if (!output.images?.[0]?.url) {
           console.error("No images in response. Full result:", result);
-          throw new Error("No image returned from FLUX Fill");
+          throw new Error("No image returned from Qwen Inpaint");
         }
 
         resultImageUrl = output.images[0].url;
@@ -236,7 +236,8 @@ export async function POST(request: NextRequest) {
           editedFrom: image.id,
           editedAt: new Date().toISOString(),
           editMode: mode,
-          model: mode === "remove" ? "flux-fill-pro" : "nano-banana-pro",
+          model:
+            mode === "remove" ? "qwen-image-edit-inpaint" : "nano-banana-pro",
         },
       });
 

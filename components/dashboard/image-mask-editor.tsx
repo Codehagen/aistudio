@@ -355,7 +355,7 @@ export function ImageMaskEditor({
       }
     };
 
-    // REMOVE MODE: Create mask and use FLUX Fill
+    // REMOVE MODE: Create mask and use Qwen Image Edit Inpaint
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = imageDimensions.width;
     tempCanvas.height = imageDimensions.height;
