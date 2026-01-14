@@ -78,6 +78,70 @@ export function ImageMaskEditor({
     typeof import("fabric").Canvas
   > | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const placementRectRef = React.useRef<InstanceType<
+    typeof import("fabric").Rect
+  > | null>(null);
+
+  // Ref callback to handle canvas unmounting
+  const canvasRefCallback = React.useCallback(
+    (element: HTMLCanvasElement | null) => {
+      console.log("[Canvas Ref] Callback called", {
+        hasElement: !!element,
+        mode,
+      });
+
+      // Always update the ref first
+      canvasRef.current = element;
+
+      // Update state to trigger initialization effect
+      setCanvasElementReady(!!element);
+
+      // Only handle cleanup when unmounting (element becomes null)
+      if (!element && fabricRef.current) {
+        // Dispose canvas before React removes it from DOM
+        try {
+          const canvasElement = fabricRef.current.getElement();
+          if (canvasElement) {
+            // Remove event listeners first
+            try {
+              fabricRef.current.off();
+            } catch (e) {
+              // Ignore
+            }
+
+            // Only dispose if element is still in DOM
+            if (canvasElement.isConnected && canvasElement.parentNode) {
+              try {
+                fabricRef.current.dispose();
+              } catch (disposeError) {
+                // Suppress removeChild errors
+                const errorMessage =
+                  disposeError instanceof Error
+                    ? disposeError.message
+                    : String(disposeError);
+                if (
+                  !(
+                    errorMessage.includes("removeChild") ||
+                    errorMessage.includes("NotFoundError")
+                  )
+                ) {
+                  console.warn("Error in canvas ref callback:", disposeError);
+                }
+              }
+            }
+          }
+        } catch (error) {
+          // Suppress all errors
+        } finally {
+          fabricRef.current = null;
+          setIsCanvasReady(false);
+        }
+      }
+      // When element is mounted (not null), don't do anything here
+      // Let the initialization effect handle it
+    },
+    []
+  );
 
   type EditMode = "remove" | "add";
   const [brushSize, setBrushSize] = React.useState(30);
@@ -89,6 +153,7 @@ export function ImageMaskEditor({
   });
   const [isCanvasReady, setIsCanvasReady] = React.useState(false);
   const [imageLoaded, setImageLoaded] = React.useState(false);
+  const [canvasElementReady, setCanvasElementReady] = React.useState(false);
   const [canvasHistory, setCanvasHistory] = React.useState<string[]>([]);
   const [cursorPosition, setCursorPosition] = React.useState<{
     x: number;
@@ -161,45 +226,255 @@ export function ImageMaskEditor({
 
   // Step 2: Initialize Fabric.js after canvas is rendered
   React.useEffect(() => {
-    if (!(imageLoaded && canvasRef.current) || imageDimensions.width === 0) {
+    console.log("[Canvas Init] Effect running", {
+      imageLoaded,
+      hasCanvasRef: !!canvasRef.current,
+      canvasElementReady,
+      imageDimensions,
+      mode,
+    });
+
+    if (
+      !(imageLoaded && canvasRef.current && canvasElementReady) ||
+      imageDimensions.width === 0
+    ) {
+      // Reset ready state if conditions aren't met
+      if (isCanvasReady) {
+        setIsCanvasReady(false);
+      }
+      console.log("[Canvas Init] Conditions not met, skipping");
       return;
     }
 
+    console.log("[Canvas Init] Starting initialization");
+
     // Dynamic import to avoid SSR issues
     const initFabric = async () => {
-      const { Canvas, PencilBrush } = await import("fabric");
+      // Store the current canvas element reference to check later
+      const currentCanvasElement = canvasRef.current;
 
-      // Dispose existing canvas if any
-      if (fabricRef.current) {
-        fabricRef.current.dispose();
+      if (!(currentCanvasElement && currentCanvasElement.parentNode)) {
+        setIsCanvasReady(false);
+        return;
       }
 
-      const canvas = new Canvas(canvasRef.current!, {
-        width: imageDimensions.width,
-        height: imageDimensions.height,
-        isDrawingMode: true,
-        backgroundColor: "transparent",
-      });
+      try {
+        const { Canvas, PencilBrush, Rect } = await import("fabric");
 
-      // Set up brush with mode-based color
-      const brush = new PencilBrush(canvas);
-      brush.color = "rgba(239, 68, 68, 0.6)"; // Red for remove (default mode)
-      brush.width = brushSize;
-      canvas.freeDrawingBrush = brush;
+        // Verify canvas element is still valid after async import
+        if (!(canvasRef.current && canvasRef.current.parentNode)) {
+          setIsCanvasReady(false);
+          return;
+        }
 
-      fabricRef.current = canvas;
-      setIsCanvasReady(true);
+        // Dispose existing canvas if any
+        if (fabricRef.current) {
+          try {
+            // Check if canvas element still exists in DOM before disposing
+            const canvasElement = fabricRef.current.getElement();
+            if (canvasElement) {
+              // Use isConnected to check if element is still in the DOM tree
+              if (canvasElement.isConnected && canvasElement.parentNode) {
+                fabricRef.current.dispose();
+              } else {
+                // Canvas was already removed from DOM, manually clean up
+                // Clear event listeners without calling dispose
+                try {
+                  fabricRef.current.off(); // Remove all event listeners
+                } catch (e) {
+                  // Ignore errors from event cleanup
+                }
+                fabricRef.current = null;
+              }
+            } else {
+              fabricRef.current = null;
+            }
+          } catch (error) {
+            // If dispose fails, just clear the ref
+            // This can happen when React unmounts the canvas element
+            // Suppress the error to prevent it from propagating
+            fabricRef.current = null;
+          }
+        }
+
+        // Final check before creating new canvas
+        if (!(canvasRef.current && canvasRef.current.parentNode)) {
+          setIsCanvasReady(false);
+          return;
+        }
+
+        const canvas = new Canvas(canvasRef.current, {
+          width: imageDimensions.width,
+          height: imageDimensions.height,
+          isDrawingMode: mode === "remove", // Only enable drawing for remove mode
+          backgroundColor: "transparent",
+        });
+
+        if (mode === "remove") {
+          // Set up brush for remove mode
+          const brush = new PencilBrush(canvas);
+          brush.color = "rgba(239, 68, 68, 0.6)"; // Red for remove
+          brush.width = brushSize;
+          canvas.freeDrawingBrush = brush;
+        } else {
+          // Add mode: Create a resizable rectangle for placement
+          // Remove existing rectangle if any
+          if (placementRectRef.current) {
+            canvas.remove(placementRectRef.current);
+          }
+
+          // Create initial rectangle (centered, 20% of canvas size)
+          const rectWidth = imageDimensions.width * 0.2;
+          const rectHeight = imageDimensions.height * 0.2;
+          const rect = new Rect({
+            left: (imageDimensions.width - rectWidth) / 2,
+            top: (imageDimensions.height - rectHeight) / 2,
+            width: rectWidth,
+            height: rectHeight,
+            fill: "rgba(34, 197, 94, 0.3)", // Green fill
+            stroke: "rgba(34, 197, 94, 1)", // Green border
+            strokeWidth: 2,
+            strokeDashArray: [5, 5], // Dashed border
+            rx: 4, // Rounded corners
+            ry: 4,
+            selectable: true,
+            hasControls: true,
+            hasBorders: true,
+            lockRotation: true, // Prevent rotation
+            cornerSize: 10,
+            transparentCorners: false,
+            cornerColor: "rgba(34, 197, 94, 1)",
+            cornerStrokeColor: "rgba(34, 197, 94, 1)",
+          });
+
+          // Update maskBounds when rectangle is moved or resized
+          const updateMaskBounds = () => {
+            const bounds = rect.getBoundingRect();
+            setMaskBounds({
+              x: bounds.left,
+              y: bounds.top,
+              width: bounds.width,
+              height: bounds.height,
+            });
+          };
+
+          rect.on("modified", updateMaskBounds);
+          rect.on("moving", updateMaskBounds);
+          rect.on("scaling", updateMaskBounds);
+
+          canvas.add(rect);
+          canvas.setActiveObject(rect);
+          placementRectRef.current = rect;
+
+          // Set initial bounds
+          updateMaskBounds();
+        }
+
+        fabricRef.current = canvas;
+        setIsCanvasReady(true);
+        console.log("[Canvas Init] Successfully initialized");
+      } catch (error) {
+        console.error("[Canvas Init] Error initializing Fabric canvas:", error);
+        setIsCanvasReady(false);
+      }
     };
 
     initFabric();
 
     return () => {
       if (fabricRef.current) {
-        fabricRef.current.dispose();
-        fabricRef.current = null;
+        try {
+          // Check if canvas element still exists in DOM before disposing
+          const canvasElement = fabricRef.current.getElement();
+          if (canvasElement) {
+            // Check if element is still connected to the DOM
+            if (canvasElement.isConnected && canvasElement.parentNode) {
+              // Double-check right before dispose to avoid race conditions
+              // React might have removed it between the check and dispose call
+              const parent = canvasElement.parentNode;
+
+              // Remove event listeners first to prevent any issues
+              try {
+                fabricRef.current.off();
+              } catch (e) {
+                // Ignore errors from event cleanup
+              }
+
+              // Now dispose - wrap in try-catch to suppress removeChild errors
+              try {
+                // Verify parent still exists right before dispose
+                if (canvasElement.parentNode === parent && parent) {
+                  fabricRef.current.dispose();
+                } else {
+                  // Element was removed between check and dispose
+                  // Just clear the ref
+                  fabricRef.current = null;
+                }
+              } catch (disposeError) {
+                // Suppress NotFoundError and removeChild errors
+                // This can happen if React already removed the element
+                const errorMessage =
+                  disposeError instanceof Error
+                    ? disposeError.message
+                    : String(disposeError);
+                if (
+                  !(
+                    errorMessage.includes("removeChild") ||
+                    errorMessage.includes("NotFoundError")
+                  )
+                ) {
+                  // Only log unexpected errors
+                  console.warn("Error disposing canvas:", disposeError);
+                }
+                // Clear ref on any error
+                fabricRef.current = null;
+              }
+            } else {
+              // Element was already removed from DOM, manually clean up
+              // Clear event listeners and references without calling dispose
+              try {
+                fabricRef.current.off(); // Remove all event listeners
+              } catch (e) {
+                // Ignore errors from event cleanup
+              }
+            }
+          }
+        } catch (error) {
+          // If anything fails, just clear the ref
+          // This is safe - the canvas was already removed from DOM
+        } finally {
+          fabricRef.current = null;
+          setIsCanvasReady(false);
+        }
       }
     };
-  }, [imageLoaded, imageDimensions, brushSize]);
+  }, [
+    imageLoaded,
+    imageDimensions,
+    brushSize,
+    canvasElementReady,
+    mode,
+    image.id,
+  ]);
+
+  // Reset canvas state when mode changes
+  // The main initialization effect will handle cleanup and re-initialization
+  React.useEffect(() => {
+    console.log("[Mode Change] Mode changed to:", mode);
+
+    // Clean up placement rectangle if switching away from add mode
+    if (fabricRef.current && placementRectRef.current) {
+      fabricRef.current.remove(placementRectRef.current);
+      placementRectRef.current = null;
+    }
+
+    // Reset state when mode changes - this will trigger cleanup in main effect
+    setIsCanvasReady(false);
+    setMaskBounds(null);
+    // Reset canvasElementReady to ensure initialization runs when new canvas mounts
+    // The ref callback will set it back to true when the new canvas element mounts
+    setCanvasElementReady(false);
+  }, [mode]);
 
   // Update brush settings based on mode
   React.useEffect(() => {
@@ -298,14 +573,25 @@ export function ImageMaskEditor({
     if (!fabricRef.current) {
       return;
     }
-    fabricRef.current.clear();
-    fabricRef.current.backgroundColor = "transparent";
-    fabricRef.current.renderAll();
-    setCanvasHistory([]);
-    setMaskBounds(null);
+
+    if (mode === "add" && placementRectRef.current) {
+      // For add mode, just remove the rectangle
+      fabricRef.current.remove(placementRectRef.current);
+      placementRectRef.current = null;
+      setMaskBounds(null);
+      fabricRef.current.renderAll();
+    } else {
+      // For remove mode, clear all drawing
+      fabricRef.current.clear();
+      fabricRef.current.backgroundColor = "transparent";
+      fabricRef.current.renderAll();
+      setCanvasHistory([]);
+      setMaskBounds(null);
+    }
+
     setObjectToAdd("");
     setObjectDescription("");
-  }, []);
+  }, [mode]);
 
   // Track cursor position for brush preview
   const handleCanvasMouseMove = React.useCallback(
@@ -415,7 +701,12 @@ export function ImageMaskEditor({
       }
     };
 
-    // ADD MODE: Create mask and use Qwen Image Edit Inpaint (same as remove mode)
+    // ADD MODE: Create mask from rectangle bounds
+    if (!(placementRectRef.current && maskBounds)) {
+      toast.error("Please place the object container first");
+      return;
+    }
+
     const tempCanvas = document.createElement("canvas");
     tempCanvas.width = imageDimensions.width;
     tempCanvas.height = imageDimensions.height;
@@ -429,34 +720,17 @@ export function ImageMaskEditor({
     tempCtx.fillStyle = "black";
     tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
 
-    // Draw the fabric canvas content - convert colored strokes to white for mask
-    const fabricCanvas = fabricRef.current;
-    const originalPaths = fabricCanvas.getObjects("path");
+    // Fill the rectangle area with white (edit area)
+    tempCtx.fillStyle = "white";
+    tempCtx.fillRect(
+      maskBounds.x,
+      maskBounds.y,
+      maskBounds.width,
+      maskBounds.height
+    );
 
-    // Temporarily change all path colors to white for the mask
-    originalPaths.forEach((path) => {
-      path.set("stroke", "white");
-    });
-    fabricCanvas.renderAll();
-
-    const fabricDataUrl = fabricCanvas.toDataURL({
-      format: "png",
-      multiplier: 1,
-    });
-
-    // Restore original colors (green for add mode)
-    originalPaths.forEach((path) => {
-      path.set("stroke", "rgba(34, 197, 94, 0.6)");
-    });
-    fabricCanvas.renderAll();
-
-    const maskImg = new window.Image();
-    maskImg.onload = async () => {
-      tempCtx.drawImage(maskImg, 0, 0);
-      const maskDataUrl = tempCanvas.toDataURL("image/png");
-      await proceedWithSubmit(maskDataUrl);
-    };
-    maskImg.src = fabricDataUrl;
+    const maskDataUrl = tempCanvas.toDataURL("image/png");
+    await proceedWithSubmit(maskDataUrl);
   }, [
     objectDetails,
     imageDimensions,
@@ -581,9 +855,14 @@ export function ImageMaskEditor({
       return;
     }
 
-    // ADD MODE: Check if we have mask and object
+    // ADD MODE: Check if we have object and placement rectangle
     if (mode === "add") {
-      if (!objectToAdd.trim() || canvasHistory.length === 0) {
+      if (!(objectToAdd.trim() && maskBounds)) {
+        if (!objectToAdd.trim()) {
+          toast.info("Please select or type an object to add");
+        } else if (!maskBounds) {
+          toast.info("Please place the object container on the image");
+        }
         return;
       }
       // Initialize object details with quick selection
@@ -605,22 +884,22 @@ export function ImageMaskEditor({
       return;
     }
 
-    // Check if mask is drawn
-    if (canvasHistory.length === 0) {
-      // Show toast prompting user to draw mask
-      toast.info("Please draw where you want to add the object", {
+    // Check if placement rectangle exists
+    if (!(maskBounds && placementRectRef.current)) {
+      // Show toast prompting user to place container
+      toast.info("Please place the object container on the image", {
         duration: 3000,
       });
-      // Close dialog so user can draw mask
+      // Close dialog so user can place container
       setShowObjectRefinementDialog(false);
       return;
     }
 
     setShowObjectRefinementDialog(false);
 
-    // Proceed with add - mask exists
+    // Proceed with add - rectangle exists
     await proceedWithAdd();
-  }, [objectDetails, canvasHistory.length, proceedWithAdd]);
+  }, [objectDetails, maskBounds, proceedWithAdd]);
 
   // Handle escape key
   React.useEffect(() => {
@@ -772,41 +1051,9 @@ export function ImageMaskEditor({
                     {/* Canvas overlay */}
                     <canvas
                       className="absolute inset-0 rounded-lg"
-                      ref={canvasRef}
-                      style={{ cursor: "none" }}
+                      key={`canvas-add-${image.id}`}
+                      ref={canvasRefCallback}
                     />
-
-                    {/* Add mode placement indicator */}
-                    {maskBounds && (
-                      <div
-                        className="pointer-events-none absolute rounded-lg border-2 border-green-400 border-dashed bg-green-400/10"
-                        style={{
-                          left: maskBounds.x,
-                          top: maskBounds.y,
-                          width: maskBounds.width,
-                          height: maskBounds.height,
-                        }}
-                      >
-                        <div className="absolute -top-6 left-0 whitespace-nowrap font-medium text-green-400 text-xs">
-                          Object placement area
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Brush size preview cursor */}
-                    {isCanvasReady && cursorPosition && (
-                      <div
-                        className="pointer-events-none absolute rounded-full border-2"
-                        style={{
-                          width: brushSize,
-                          height: brushSize,
-                          left: cursorPosition.x - brushSize / 2,
-                          top: cursorPosition.y - brushSize / 2,
-                          borderColor: "rgb(34, 197, 94)",
-                          backgroundColor: "rgba(34, 197, 94, 0.2)",
-                        }}
-                      />
-                    )}
 
                     {/* Canvas loading indicator */}
                     {!isCanvasReady && (
@@ -928,7 +1175,8 @@ export function ImageMaskEditor({
                 {/* Canvas overlay */}
                 <canvas
                   className="absolute inset-0 rounded-lg"
-                  ref={canvasRef}
+                  key={`canvas-remove-${image.id}`}
+                  ref={canvasRefCallback}
                   style={{ cursor: "none" }}
                 />
 
@@ -991,14 +1239,19 @@ export function ImageMaskEditor({
             <>
               <p className="text-white/70">
                 {objectToAdd.trim()
-                  ? canvasHistory.length === 0
-                    ? "Draw where you want to add the object, then click 'Add Object'"
-                    : "Ready! Click 'Add Object' to continue"
+                  ? maskBounds
+                    ? "Ready! Click 'Add Object' to continue"
+                    : "Place and resize the container where you want to add the object, then click 'Add Object'"
                   : "Select or type an object to add"}
               </p>
               <Button
                 className="min-w-[120px] gap-2 bg-green-500 hover:bg-green-600"
-                disabled={isProcessing || !isCanvasReady || !objectToAdd.trim()}
+                disabled={
+                  isProcessing ||
+                  !isCanvasReady ||
+                  !objectToAdd.trim() ||
+                  !maskBounds
+                }
                 onClick={handleSubmit}
               >
                 {isProcessing ? (
