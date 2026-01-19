@@ -2,7 +2,6 @@
 
 import {
   IconArrowBackUp,
-  IconCheck,
   IconLoader2,
   IconPlus,
   IconSparkles,
@@ -36,27 +35,6 @@ import { useInpaint } from "@/hooks/use-inpaint";
 import type { ImageGeneration } from "@/lib/db/schema";
 import { cn } from "@/lib/utils";
 
-// Common real estate staging suggestions
-const OBJECT_SUGGESTIONS = [
-  "Chair",
-  "Plant",
-  "Lamp",
-  "Painting",
-  "Rug",
-  "Coffee table",
-  "Sofa",
-  "Mirror",
-  "Vase",
-  "Bookshelf",
-];
-
-interface MaskBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 interface ImageMaskEditorProps {
   image: ImageGeneration;
   latestVersion: number;
@@ -78,9 +56,6 @@ export function ImageMaskEditor({
     typeof import("fabric").Canvas
   > | null>(null);
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const placementRectRef = React.useRef<InstanceType<
-    typeof import("fabric").Rect
-  > | null>(null);
 
   // Ref callback to handle canvas unmounting
   const canvasRefCallback = React.useCallback(
@@ -146,7 +121,6 @@ export function ImageMaskEditor({
   type EditMode = "remove" | "add";
   const [brushSize, setBrushSize] = React.useState(30);
   const [mode, setMode] = React.useState<EditMode>("remove");
-  const [objectToAdd, setObjectToAdd] = React.useState("");
   const [imageDimensions, setImageDimensions] = React.useState({
     width: 0,
     height: 0,
@@ -159,7 +133,6 @@ export function ImageMaskEditor({
     x: number;
     y: number;
   } | null>(null);
-  const [maskBounds, setMaskBounds] = React.useState<MaskBounds | null>(null);
   const [showReplaceDialog, setShowReplaceDialog] = React.useState(false);
   const [pendingSubmitData, setPendingSubmitData] = React.useState<{
     maskDataUrl: string;
@@ -259,7 +232,7 @@ export function ImageMaskEditor({
       }
 
       try {
-        const { Canvas, PencilBrush, Rect } = await import("fabric");
+        const { Canvas, PencilBrush } = await import("fabric");
 
         // Verify canvas element is still valid after async import
         if (!(canvasRef.current && canvasRef.current.parentNode)) {
@@ -306,69 +279,17 @@ export function ImageMaskEditor({
         const canvas = new Canvas(canvasRef.current, {
           width: imageDimensions.width,
           height: imageDimensions.height,
-          isDrawingMode: mode === "remove", // Only enable drawing for remove mode
+          isDrawingMode: true,
           backgroundColor: "transparent",
         });
 
-        if (mode === "remove") {
-          // Set up brush for remove mode
-          const brush = new PencilBrush(canvas);
-          brush.color = "rgba(239, 68, 68, 0.6)"; // Red for remove
-          brush.width = brushSize;
-          canvas.freeDrawingBrush = brush;
-        } else {
-          // Add mode: Create a resizable rectangle for placement
-          // Remove existing rectangle if any
-          if (placementRectRef.current) {
-            canvas.remove(placementRectRef.current);
-          }
-
-          // Create initial rectangle (centered, 20% of canvas size)
-          const rectWidth = imageDimensions.width * 0.2;
-          const rectHeight = imageDimensions.height * 0.2;
-          const rect = new Rect({
-            left: (imageDimensions.width - rectWidth) / 2,
-            top: (imageDimensions.height - rectHeight) / 2,
-            width: rectWidth,
-            height: rectHeight,
-            fill: "rgba(34, 197, 94, 0.3)", // Green fill
-            stroke: "rgba(34, 197, 94, 1)", // Green border
-            strokeWidth: 2,
-            strokeDashArray: [5, 5], // Dashed border
-            rx: 4, // Rounded corners
-            ry: 4,
-            selectable: true,
-            hasControls: true,
-            hasBorders: true,
-            lockRotation: true, // Prevent rotation
-            cornerSize: 10,
-            transparentCorners: false,
-            cornerColor: "rgba(34, 197, 94, 1)",
-            cornerStrokeColor: "rgba(34, 197, 94, 1)",
-          });
-
-          // Update maskBounds when rectangle is moved or resized
-          const updateMaskBounds = () => {
-            const bounds = rect.getBoundingRect();
-            setMaskBounds({
-              x: bounds.left,
-              y: bounds.top,
-              width: bounds.width,
-              height: bounds.height,
-            });
-          };
-
-          rect.on("modified", updateMaskBounds);
-          rect.on("moving", updateMaskBounds);
-          rect.on("scaling", updateMaskBounds);
-
-          canvas.add(rect);
-          canvas.setActiveObject(rect);
-          placementRectRef.current = rect;
-
-          // Set initial bounds
-          updateMaskBounds();
-        }
+        const brush = new PencilBrush(canvas);
+        brush.color =
+          mode === "remove"
+            ? "rgba(239, 68, 68, 0.6)"
+            : "rgba(34, 197, 94, 0.6)";
+        brush.width = brushSize;
+        canvas.freeDrawingBrush = brush;
 
         fabricRef.current = canvas;
         setIsCanvasReady(true);
@@ -462,19 +383,13 @@ export function ImageMaskEditor({
   React.useEffect(() => {
     console.log("[Mode Change] Mode changed to:", mode);
 
-    // Clean up placement rectangle if switching away from add mode
-    if (fabricRef.current && placementRectRef.current) {
-      fabricRef.current.remove(placementRectRef.current);
-      placementRectRef.current = null;
-    }
-
     // Reset state when mode changes - this will trigger cleanup in main effect
     setIsCanvasReady(false);
-    setMaskBounds(null);
+    setCanvasHistory([]);
     // Reset canvasElementReady to ensure initialization runs when new canvas mounts
     // The ref callback will set it back to true when the new canvas element mounts
     setCanvasElementReady(false);
-  }, [mode]);
+  }, []);
 
   // Update brush settings based on mode
   React.useEffect(() => {
@@ -490,35 +405,6 @@ export function ImageMaskEditor({
         : "rgba(34, 197, 94, 0.6)"; // Green for add
   }, [brushSize, mode, isCanvasReady]);
 
-  // Calculate mask bounds from paths
-  const calculateMaskBounds = React.useCallback(() => {
-    const paths = fabricRef.current?.getObjects("path");
-    if (!paths?.length) {
-      setMaskBounds(null);
-      return;
-    }
-
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = 0;
-    let maxY = 0;
-
-    paths.forEach((path) => {
-      const bounds = path.getBoundingRect();
-      minX = Math.min(minX, bounds.left);
-      minY = Math.min(minY, bounds.top);
-      maxX = Math.max(maxX, bounds.left + bounds.width);
-      maxY = Math.max(maxY, bounds.top + bounds.height);
-    });
-
-    setMaskBounds({
-      x: minX,
-      y: maxY, // Position below the mask
-      width: maxX - minX,
-      height: maxY - minY,
-    });
-  }, []);
-
   // Track canvas history for undo
   React.useEffect(() => {
     if (!(fabricRef.current && isCanvasReady)) {
@@ -530,15 +416,13 @@ export function ImageMaskEditor({
       // Save current state before the new path for undo
       const json = JSON.stringify(canvas.toJSON());
       setCanvasHistory((prev) => [...prev, json]);
-      // Calculate mask bounds for floating input positioning
-      calculateMaskBounds();
     };
 
     canvas.on("path:created", handlePathCreated);
     return () => {
       canvas.off("path:created", handlePathCreated);
     };
-  }, [isCanvasReady, calculateMaskBounds]);
+  }, [isCanvasReady]);
 
   const handleUndo = React.useCallback(() => {
     if (!fabricRef.current || canvasHistory.length === 0) {
@@ -554,42 +438,28 @@ export function ImageMaskEditor({
       canvas.clear();
       canvas.backgroundColor = "transparent";
       canvas.renderAll();
-      setMaskBounds(null);
     } else {
       // Load previous state
       const prevState = newHistory.at(-1);
       if (prevState) {
         canvas.loadFromJSON(prevState, () => {
           canvas.renderAll();
-          calculateMaskBounds();
         });
       }
     }
 
     setCanvasHistory(newHistory);
-  }, [canvasHistory, calculateMaskBounds]);
+  }, [canvasHistory]);
 
   const handleClear = React.useCallback(() => {
     if (!fabricRef.current) {
       return;
     }
 
-    if (mode === "add" && placementRectRef.current) {
-      // For add mode, just remove the rectangle
-      fabricRef.current.remove(placementRectRef.current);
-      placementRectRef.current = null;
-      setMaskBounds(null);
-      fabricRef.current.renderAll();
-    } else {
-      // For remove mode, clear all drawing
-      fabricRef.current.clear();
-      fabricRef.current.backgroundColor = "transparent";
-      fabricRef.current.renderAll();
-      setCanvasHistory([]);
-      setMaskBounds(null);
-    }
-
-    setObjectToAdd("");
+    fabricRef.current.clear();
+    fabricRef.current.backgroundColor = "transparent";
+    fabricRef.current.renderAll();
+    setCanvasHistory([]);
     setObjectDescription("");
   }, [mode]);
 
@@ -701,9 +571,12 @@ export function ImageMaskEditor({
       }
     };
 
-    // ADD MODE: Create mask from rectangle bounds
-    if (!(placementRectRef.current && maskBounds)) {
-      toast.error("Please place the object container first");
+    // ADD MODE: Create mask from drawn strokes
+    const fabricCanvas = fabricRef.current;
+    const originalPaths = fabricCanvas.getObjects("path");
+
+    if (!originalPaths.length) {
+      toast.info("Please draw the area where you want to add the object");
       return;
     }
 
@@ -720,23 +593,43 @@ export function ImageMaskEditor({
     tempCtx.fillStyle = "black";
     tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
 
-    // Fill the rectangle area with white (edit area)
-    tempCtx.fillStyle = "white";
-    tempCtx.fillRect(
-      maskBounds.x,
-      maskBounds.y,
-      maskBounds.width,
-      maskBounds.height
-    );
+    // Temporarily change all path colors to white for the mask
+    originalPaths.forEach((path) => {
+      path.set("stroke", "white");
+    });
+    fabricCanvas.renderAll();
 
-    const maskDataUrl = tempCanvas.toDataURL("image/png");
-    await proceedWithSubmit(maskDataUrl);
+    const fabricDataUrl = fabricCanvas.toDataURL({
+      format: "png",
+      multiplier: 1,
+    });
+
+    // Restore original colors
+    originalPaths.forEach((path) => {
+      path.set(
+        "stroke",
+        mode === "remove" ? "rgba(239, 68, 68, 0.6)" : "rgba(34, 197, 94, 0.6)"
+      );
+    });
+    fabricCanvas.renderAll();
+
+    const maskImg = new window.Image();
+    maskImg.onload = async () => {
+      tempCtx.drawImage(maskImg, 0, 0);
+
+      // Get the final mask as data URL
+      const maskDataUrl = tempCanvas.toDataURL("image/png");
+
+      await proceedWithSubmit(maskDataUrl);
+    };
+    maskImg.src = fabricDataUrl;
   }, [
     objectDetails,
     imageDimensions,
     isEditingOldVersion,
     executeInpaint,
     generateAddPrompt,
+    mode,
   ]);
 
   // Proceed with removal after description is provided
@@ -855,24 +748,17 @@ export function ImageMaskEditor({
       return;
     }
 
-    // ADD MODE: Check if we have object and placement rectangle
+    // ADD MODE: Check if we have a mask
     if (mode === "add") {
-      if (!(objectToAdd.trim() && maskBounds)) {
-        if (!objectToAdd.trim()) {
-          toast.info("Please select or type an object to add");
-        } else if (!maskBounds) {
-          toast.info("Please place the object container on the image");
-        }
+      if (canvasHistory.length === 0) {
+        toast.info("Please draw the area where you want to add the object");
         return;
       }
-      // Initialize object details with quick selection
-      setObjectDetails((prev) => ({ ...prev, name: objectToAdd.trim() }));
       setShowObjectRefinementDialog(true);
       return;
     }
   }, [
     mode,
-    objectToAdd,
     objectDescription,
     canvasHistory.length,
     proceedWithRemoval,
@@ -884,22 +770,11 @@ export function ImageMaskEditor({
       return;
     }
 
-    // Check if placement rectangle exists
-    if (!(maskBounds && placementRectRef.current)) {
-      // Show toast prompting user to place container
-      toast.info("Please place the object container on the image", {
-        duration: 3000,
-      });
-      // Close dialog so user can place container
-      setShowObjectRefinementDialog(false);
-      return;
-    }
-
     setShowObjectRefinementDialog(false);
 
     // Proceed with add - rectangle exists
     await proceedWithAdd();
-  }, [objectDetails, maskBounds, proceedWithAdd]);
+  }, [objectDetails, proceedWithAdd]);
 
   // Handle escape key
   React.useEffect(() => {
@@ -1027,182 +902,58 @@ export function ImageMaskEditor({
         {/* Background image + Canvas */}
         {imageLoaded && imageDimensions.width > 0 && (
           <>
-            {mode === "add" ? (
-              /* Add mode: Image and panel side-by-side */
-              <div className="mx-auto flex w-full max-w-7xl flex-col items-center gap-6 lg:flex-row">
-                {/* Image container - left side */}
-                <div className="w-full shrink-0 lg:w-auto">
-                  <div
-                    className="relative"
-                    onMouseLeave={handleCanvasMouseLeave}
-                    onMouseMove={handleCanvasMouseMove}
-                    style={{
-                      width: imageDimensions.width,
-                      height: imageDimensions.height,
-                    }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      alt="Source"
-                      className="absolute inset-0 h-full w-full rounded-lg object-cover"
-                      src={sourceImageUrl}
-                    />
+            <div
+              className="relative"
+              onMouseLeave={handleCanvasMouseLeave}
+              onMouseMove={handleCanvasMouseMove}
+              style={{
+                width: imageDimensions.width,
+                height: imageDimensions.height,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                alt="Source"
+                className="absolute inset-0 h-full w-full rounded-lg object-cover"
+                src={sourceImageUrl}
+              />
 
-                    {/* Canvas overlay */}
-                    <canvas
-                      className="absolute inset-0 rounded-lg"
-                      key={`canvas-add-${image.id}`}
-                      ref={canvasRefCallback}
-                    />
+              {/* Canvas overlay */}
+              <canvas
+                className="absolute inset-0 rounded-lg"
+                key={`canvas-${mode}-${image.id}`}
+                ref={canvasRefCallback}
+                style={{ cursor: "none" }}
+              />
 
-                    {/* Canvas loading indicator */}
-                    {!isCanvasReady && (
-                      <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/30">
-                        <IconLoader2 className="h-6 w-6 animate-spin text-white" />
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Quick Add Panel - right side */}
-                <div className="w-full shrink-0 lg:w-80">
-                  <div className="rounded-lg border border-white/20 bg-black/90 p-4 shadow-xl backdrop-blur-sm">
-                    {/* Step indicators */}
-                    <div className="mb-4 space-y-2">
-                      <div
-                        className={cn(
-                          "flex items-center gap-2 text-xs",
-                          objectToAdd.trim()
-                            ? "text-green-400"
-                            : "text-white/50"
-                        )}
-                      >
-                        {objectToAdd.trim() ? (
-                          <IconCheck className="h-4 w-4" />
-                        ) : (
-                          <div className="h-4 w-4 rounded-full border-2 border-white/30" />
-                        )}
-                        <span>Select object</span>
-                      </div>
-                      <div
-                        className={cn(
-                          "flex items-center gap-2 text-xs",
-                          canvasHistory.length > 0
-                            ? "text-green-400"
-                            : "text-white/50"
-                        )}
-                      >
-                        {canvasHistory.length > 0 ? (
-                          <IconCheck className="h-4 w-4" />
-                        ) : (
-                          <div className="h-4 w-4 rounded-full border-2 border-white/30" />
-                        )}
-                        <span>Draw placement area</span>
-                      </div>
-                    </div>
-
-                    <p className="mb-2 font-medium text-white/70 text-xs">
-                      Quick add:
-                    </p>
-                    <div className="mb-3 flex flex-wrap gap-1.5">
-                      {OBJECT_SUGGESTIONS.map((suggestion) => (
-                        <button
-                          className={cn(
-                            "rounded-full px-2.5 py-1 font-medium text-xs transition-colors",
-                            objectToAdd === suggestion
-                              ? "bg-green-500 text-white"
-                              : "bg-white/10 text-white/80 hover:bg-white/20"
-                          )}
-                          key={suggestion}
-                          onClick={() => setObjectToAdd(suggestion)}
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        className="h-8 flex-1 border-white/20 bg-white/10 text-sm text-white placeholder:text-white/40"
-                        disabled={isProcessing}
-                        onChange={(e) => setObjectToAdd(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (
-                            e.key === "Enter" &&
-                            objectToAdd.trim() &&
-                            !isProcessing
-                          ) {
-                            handleSubmit();
-                          }
-                        }}
-                        placeholder="Or type custom…"
-                        value={objectToAdd}
-                      />
-                      <Button
-                        className="h-8 gap-1.5 bg-green-500 hover:bg-green-600"
-                        disabled={isProcessing || !objectToAdd.trim()}
-                        onClick={handleSubmit}
-                        size="sm"
-                      >
-                        {isProcessing ? (
-                          <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <IconSparkles className="h-3.5 w-3.5" />
-                        )}
-                        Add
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Remove mode: Original centered layout */
-              <div
-                className="relative"
-                onMouseLeave={handleCanvasMouseLeave}
-                onMouseMove={handleCanvasMouseMove}
-                style={{
-                  width: imageDimensions.width,
-                  height: imageDimensions.height,
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  alt="Source"
-                  className="absolute inset-0 h-full w-full rounded-lg object-cover"
-                  src={sourceImageUrl}
+              {/* Brush size preview cursor */}
+              {isCanvasReady && cursorPosition && (
+                <div
+                  className="pointer-events-none absolute rounded-full border-2"
+                  style={{
+                    width: brushSize,
+                    height: brushSize,
+                    left: cursorPosition.x - brushSize / 2,
+                    top: cursorPosition.y - brushSize / 2,
+                    borderColor:
+                      mode === "remove"
+                        ? "rgb(239, 68, 68)"
+                        : "rgb(34, 197, 94)",
+                    backgroundColor:
+                      mode === "remove"
+                        ? "rgba(239, 68, 68, 0.2)"
+                        : "rgba(34, 197, 94, 0.2)",
+                  }}
                 />
+              )}
 
-                {/* Canvas overlay */}
-                <canvas
-                  className="absolute inset-0 rounded-lg"
-                  key={`canvas-remove-${image.id}`}
-                  ref={canvasRefCallback}
-                  style={{ cursor: "none" }}
-                />
-
-                {/* Brush size preview cursor */}
-                {isCanvasReady && cursorPosition && (
-                  <div
-                    className="pointer-events-none absolute rounded-full border-2"
-                    style={{
-                      width: brushSize,
-                      height: brushSize,
-                      left: cursorPosition.x - brushSize / 2,
-                      top: cursorPosition.y - brushSize / 2,
-                      borderColor: "rgb(239, 68, 68)",
-                      backgroundColor: "rgba(239, 68, 68, 0.2)",
-                    }}
-                  />
-                )}
-
-                {/* Canvas loading indicator */}
-                {!isCanvasReady && (
-                  <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/30">
-                    <IconLoader2 className="h-6 w-6 animate-spin text-white" />
-                  </div>
-                )}
-              </div>
-            )}
+              {/* Canvas loading indicator */}
+              {!isCanvasReady && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/30">
+                  <IconLoader2 className="h-6 w-6 animate-spin text-white" />
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -1238,19 +989,12 @@ export function ImageMaskEditor({
           ) : (
             <>
               <p className="text-white/70">
-                {objectToAdd.trim()
-                  ? maskBounds
-                    ? "Ready! Click 'Add Object' to continue"
-                    : "Place and resize the container where you want to add the object, then click 'Add Object'"
-                  : "Select or type an object to add"}
+                Draw on the area where you want to add the object
               </p>
               <Button
                 className="min-w-[120px] gap-2 bg-green-500 hover:bg-green-600"
                 disabled={
-                  isProcessing ||
-                  !isCanvasReady ||
-                  !objectToAdd.trim() ||
-                  !maskBounds
+                  isProcessing || !isCanvasReady || canvasHistory.length === 0
                 }
                 onClick={handleSubmit}
               >
