@@ -2,16 +2,18 @@
 
 import { useCallback, useState } from "react";
 import { triggerInpaintTask } from "@/lib/actions";
+import type { AIProvider } from "@/lib/providers/types";
 
 type EditMode = "remove" | "add";
 
 interface UseInpaintReturn {
   inpaint: (
     imageId: string,
-    maskDataUrl: string,
+    maskDataUrl: string | undefined,
     prompt: string,
     mode: EditMode,
-    replaceNewerVersions?: boolean
+    replaceNewerVersions?: boolean,
+    provider?: AIProvider
   ) => Promise<{ success: boolean; runId?: string; newImageId?: string }>;
   isProcessing: boolean;
   error: string | null;
@@ -33,19 +35,20 @@ export function useInpaint(): UseInpaintReturn {
   const inpaint = useCallback(
     async (
       imageId: string,
-      maskDataUrl: string,
+      maskDataUrl: string | undefined,
       prompt: string,
       mode: EditMode,
-      replaceNewerVersions = false
+      replaceNewerVersions = false,
+      provider: AIProvider = "fal"
     ): Promise<{ success: boolean; runId?: string; newImageId?: string }> => {
       if (!(imageId && prompt)) {
         setError("Missing required fields");
         return { success: false };
       }
 
-      // Mask is required for remove mode, optional for add mode
-      if (mode === "remove" && !maskDataUrl) {
-        setError("Mask is required for remove mode");
+      // Mask is required for Fal.ai provider only
+      if (provider === "fal" && !maskDataUrl) {
+        setError("Mask is required for Fal.ai provider");
         return { success: false };
       }
 
@@ -59,7 +62,8 @@ export function useInpaint(): UseInpaintReturn {
           prompt,
           mode,
           maskDataUrl,
-          replaceNewerVersions
+          replaceNewerVersions,
+          provider
         );
 
         if (!result.success) {

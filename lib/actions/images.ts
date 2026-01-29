@@ -969,7 +969,8 @@ export async function triggerInpaintTask(
   prompt: string,
   mode: EditMode,
   maskDataUrl?: string,
-  replaceNewerVersions?: boolean
+  replaceNewerVersions?: boolean,
+  provider: "fal" | "xai" = "fal"
 ): Promise<ActionResult<{ runId: string; newImageId: string }>> {
   const session = await auth.api.getSession({
     headers: await headers(),
@@ -996,11 +997,11 @@ export async function triggerInpaintTask(
     return { success: false, error: "Image not found" };
   }
 
-  // Mask is required for both modes
-  if (!maskDataUrl) {
+  // Mask is required for Fal.ai provider, optional for xAI (prompt-only)
+  if (provider === "fal" && !maskDataUrl) {
     return {
       success: false,
-      error: "Mask is required for both add and remove modes",
+      error: "Mask is required for Fal.ai provider",
     };
   }
 
@@ -1031,6 +1032,7 @@ export async function triggerInpaintTask(
       metadata: {
         editedFrom: imageId,
         editMode: mode,
+        provider,
       },
     });
 
@@ -1041,6 +1043,7 @@ export async function triggerInpaintTask(
       mode,
       hasMask: !!maskDataUrl,
       promptLength: prompt.length,
+      provider,
     });
 
     let handle;
@@ -1053,6 +1056,7 @@ export async function triggerInpaintTask(
         prompt,
         mode,
         maskDataUrl,
+        provider,
       });
 
       if (!handle?.id) {

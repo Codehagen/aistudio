@@ -197,6 +197,7 @@ export function VideoCreationWizard() {
         musicTrackId: creation.selectedMusicTrack?.id ?? null,
         musicVolume: creation.musicVolume,
         generateNativeAudio: creation.generateNativeAudio,
+        provider: creation.provider,
         clips: creation.images.map((img) => ({
           sourceImageUrl: img.startImageUrl || img.url,
           imageGenerationId:
@@ -382,7 +383,9 @@ export function VideoCreationWizard() {
                 images={creation.images}
                 musicTrack={creation.selectedMusicTrack}
                 onProjectNameChange={creation.setProjectName}
+                onProviderChange={creation.setProvider}
                 projectName={creation.projectName}
+                provider={creation.provider}
               />
             )}
           </div>

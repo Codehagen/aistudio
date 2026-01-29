@@ -10,6 +10,7 @@ import {
   QWEN_IMAGE_EDIT_INPAINT,
   type QwenInpaintOutput,
 } from "@/lib/fal";
+import type { AIProvider } from "@/lib/providers/types";
 import {
   getExtensionFromContentType,
   getImagePath,
@@ -24,6 +25,7 @@ export interface InpaintImagePayload {
   maskDataUrl?: string;
   prompt: string;
   mode: EditMode;
+  provider?: AIProvider; // Optional, defaults to "fal"
 }
 
 export interface InpaintImageStatus {
@@ -55,6 +57,7 @@ export const inpaintImageTask = task({
       maskDataUrl,
       prompt,
       mode = "remove",
+      provider = "fal",
     } = payload;
 
     try {
@@ -65,7 +68,11 @@ export const inpaintImageTask = task({
         progress: 10,
       } satisfies InpaintImageStatus);
 
-      logger.info("Fetching image record for inpainting", { imageId, mode });
+      logger.info("Fetching image record for inpainting", {
+        imageId,
+        mode,
+        provider,
+      });
 
       const image = await getImageGenerationById(imageId);
       if (!image) {
@@ -105,30 +112,61 @@ export const inpaintImageTask = task({
         height: imageHeight,
       });
 
-      // Upload source image to Fal.ai storage
-      const imageBlob = new Blob([imageBuffer], {
-        type: imageResponse.headers.get("content-type") || "image/jpeg",
-      });
-      const falImageUrl = await fal.storage.upload(
-        new File([imageBlob], "input.jpg", { type: imageBlob.type })
-      );
-
-      logger.info("Uploaded image to Fal.ai storage", { falImageUrl });
-
       let resultImageUrl: string;
       let contentType: string;
+      let modelUsed: string;
 
-      // Step 3: Process with AI
+      // Step 3: Process with AI (provider routing)
       metadata.set("status", {
         step: "processing",
         label: mode === "remove" ? "Removing selected area…" : "Adding object…",
         progress: 50,
       } satisfies InpaintImageStatus);
 
-      if (mode === "remove") {
-        // REMOVE MODE: Use Qwen Image Edit Inpaint (inpainting)
+      if (provider === "xai") {
+        // =========================================================
+        // xAI Provider: Prompt-only editing (no mask support)
+        // =========================================================
+        logger.info("Using xAI provider for image editing");
+
+        // Import xAI functions dynamically to avoid loading if not needed
+        const { editImage: xaiEditImage, imageUrlToBase64 } = await import(
+          "@/lib/xai"
+        );
+
+        // Convert source image to base64 for xAI API
+        const imageBase64 = await imageUrlToBase64(sourceImageUrl);
+
+        // Call xAI image edit API
+        const xaiResult = await xaiEditImage({
+          image: imageBase64,
+          prompt,
+        });
+
+        logger.info("xAI edit result received");
+
+        resultImageUrl = xaiResult.url;
+        contentType = "image/png"; // xAI returns PNG
+        modelUsed = "xai-grok-2-image";
+      } else {
+        // =========================================================
+        // Fal.ai Provider: Mask-based inpainting (default)
+        // =========================================================
+        logger.info("Using Fal.ai provider for image editing");
+
+        // Upload source image to Fal.ai storage
+        const imageBlob = new Blob([imageBuffer], {
+          type: imageResponse.headers.get("content-type") || "image/jpeg",
+        });
+        const falImageUrl = await fal.storage.upload(
+          new File([imageBlob], "input.jpg", { type: imageBlob.type })
+        );
+
+        logger.info("Uploaded image to Fal.ai storage", { falImageUrl });
+
+        // Mask is required for Fal.ai
         if (!maskDataUrl) {
-          throw new Error("Mask is required for remove mode");
+          throw new Error("Mask is required for Fal.ai provider");
         }
 
         // Convert base64 mask data URL to buffer
@@ -174,55 +212,7 @@ export const inpaintImageTask = task({
 
         resultImageUrl = output.images[0].url;
         contentType = output.images[0].content_type || "image/jpeg";
-      } else {
-        // ADD MODE: Use Qwen Image Edit Inpaint (same as remove mode)
-        if (!maskDataUrl) {
-          throw new Error("Mask is required for add mode");
-        }
-
-        // Convert base64 mask data URL to buffer (same as remove mode)
-        const maskBase64 = maskDataUrl.split(",")[1];
-        const maskBuffer = Buffer.from(maskBase64, "base64");
-
-        // Resize mask to match source image dimensions
-        const resizedMaskBuffer = await sharp(maskBuffer)
-          .resize(imageWidth, imageHeight, { fit: "fill" })
-          .png()
-          .toBuffer();
-
-        logger.info("Resized mask to match source image dimensions");
-
-        // Upload resized mask to Fal.ai storage
-        const maskBlob = new Blob([new Uint8Array(resizedMaskBuffer)], {
-          type: "image/png",
-        });
-        const falMaskUrl = await fal.storage.upload(
-          new File([maskBlob], "mask.png", { type: "image/png" })
-        );
-
-        logger.info("Uploaded mask to Fal.ai storage", { falMaskUrl });
-
-        // Call Qwen Image Edit Inpaint API (same as remove mode)
-        const result = (await fal.subscribe(QWEN_IMAGE_EDIT_INPAINT, {
-          input: {
-            prompt,
-            image_url: falImageUrl,
-            mask_url: falMaskUrl,
-            output_format: "jpeg",
-          },
-        })) as unknown as QwenInpaintOutput;
-
-        logger.info("Qwen Inpaint result received");
-
-        // Check for result - handle both direct and wrapped response
-        const output = (result as { data?: QwenInpaintOutput }).data || result;
-        if (!output.images?.[0]?.url) {
-          logger.error("No images in response", { result });
-          throw new Error("No image returned from Qwen Inpaint");
-        }
-
-        resultImageUrl = output.images[0].url;
-        contentType = output.images[0].content_type || "image/jpeg";
+        modelUsed = "qwen-image-edit-inpaint";
       }
 
       // Step 4: Save result
@@ -268,7 +258,8 @@ export const inpaintImageTask = task({
           editedFrom: imageId,
           editedAt: new Date().toISOString(),
           editMode: mode,
-          model: "qwen-image-edit-inpaint",
+          model: modelUsed,
+          provider,
         },
       });
 

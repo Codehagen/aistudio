@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ProviderInfo, ProviderSelect } from "@/components/ui/provider-select";
 import {
   Select,
   SelectContent,
@@ -33,6 +34,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { useInpaint } from "@/hooks/use-inpaint";
 import type { ImageGeneration } from "@/lib/db/schema";
+import type { AIProvider } from "@/lib/providers/types";
 import { cn } from "@/lib/utils";
 
 interface ImageMaskEditorProps {
@@ -121,6 +123,7 @@ export function ImageMaskEditor({
   type EditMode = "remove" | "add";
   const [brushSize, setBrushSize] = React.useState(30);
   const [mode, setMode] = React.useState<EditMode>("remove");
+  const [provider, setProvider] = React.useState<AIProvider>("fal");
   const [imageDimensions, setImageDimensions] = React.useState({
     width: 0,
     height: 0,
@@ -482,7 +485,7 @@ export function ImageMaskEditor({
   // Execute the actual API call
   const executeInpaint = React.useCallback(
     async (
-      maskDataUrl: string,
+      maskDataUrl: string | undefined,
       prompt: string,
       editMode: EditMode,
       replaceNewerVersions: boolean
@@ -492,7 +495,8 @@ export function ImageMaskEditor({
         maskDataUrl,
         prompt,
         editMode,
-        replaceNewerVersions
+        replaceNewerVersions,
+        provider
       );
 
       if (result.success && result.runId && result.newImageId) {
@@ -515,7 +519,7 @@ export function ImageMaskEditor({
         toast.error("Failed to start edit. Please try again.");
       }
     },
-    [image.id, inpaint, router, onClose, onEditStarted]
+    [image.id, inpaint, router, onClose, onEditStarted, provider]
   );
 
   // Generate prompt for adding object
@@ -817,43 +821,60 @@ export function ImageMaskEditor({
             </Button>
           </div>
 
-          {/* Brush size */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-white/70">Size:</span>
-            <Slider
-              className="w-32"
-              max={100}
-              min={5}
-              onValueChange={([value]) => setBrushSize(value)}
-              step={5}
-              value={[brushSize]}
+          {/* Provider selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-white/70">Provider:</span>
+            <ProviderSelect
+              disabled={isProcessing}
+              onChange={setProvider}
+              size="sm"
+              value={provider}
             />
-            <span className="w-8 text-sm text-white/70 tabular-nums">
-              {brushSize}
-            </span>
           </div>
 
-          {/* Undo button */}
-          <Button
-            className="gap-1.5 text-white hover:bg-white/20 hover:text-white disabled:opacity-40"
-            disabled={canvasHistory.length === 0}
-            onClick={handleUndo}
-            size="sm"
-            variant="ghost"
-          >
-            <IconArrowBackUp className="h-4 w-4" />
-            Undo
-          </Button>
+          {/* Brush size - only show for Fal.ai provider */}
+          {provider === "fal" && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-white/70">Size:</span>
+              <Slider
+                className="w-32"
+                max={100}
+                min={5}
+                onValueChange={([value]) => setBrushSize(value)}
+                step={5}
+                value={[brushSize]}
+              />
+              <span className="w-8 text-sm text-white/70 tabular-nums">
+                {brushSize}
+              </span>
+            </div>
+          )}
 
-          {/* Clear button */}
-          <Button
-            className="gap-1.5 text-white/70 hover:bg-white/20 hover:text-white"
-            onClick={handleClear}
-            size="sm"
-            variant="ghost"
-          >
-            Clear
-          </Button>
+          {/* Undo button - only show for Fal.ai provider */}
+          {provider === "fal" && (
+            <Button
+              className="gap-1.5 text-white hover:bg-white/20 hover:text-white disabled:opacity-40"
+              disabled={canvasHistory.length === 0}
+              onClick={handleUndo}
+              size="sm"
+              variant="ghost"
+            >
+              <IconArrowBackUp className="h-4 w-4" />
+              Undo
+            </Button>
+          )}
+
+          {/* Clear button - only show for Fal.ai provider */}
+          {provider === "fal" && (
+            <Button
+              className="gap-1.5 text-white/70 hover:bg-white/20 hover:text-white"
+              onClick={handleClear}
+              size="sm"
+              variant="ghost"
+            >
+              Clear
+            </Button>
+          )}
         </div>
 
         {/* Close button */}
@@ -894,8 +915,8 @@ export function ImageMaskEditor({
           </div>
         )}
 
-        {/* Background image + Canvas */}
-        {imageLoaded && imageDimensions.width > 0 && (
+        {/* Background image + Canvas (Fal.ai provider with mask support) */}
+        {imageLoaded && imageDimensions.width > 0 && provider === "fal" && (
           <>
             <div
               className="relative"
@@ -951,22 +972,116 @@ export function ImageMaskEditor({
             </div>
           </>
         )}
+
+        {/* Image preview only (xAI provider - prompt-only mode) */}
+        {imageLoaded && imageDimensions.width > 0 && provider === "xai" && (
+          <div className="flex flex-col items-center gap-4">
+            <div
+              className="relative overflow-hidden rounded-lg border-2 border-blue-500/50"
+              style={{
+                width: imageDimensions.width,
+                height: imageDimensions.height,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                alt="Source"
+                className="h-full w-full object-cover"
+                src={sourceImageUrl}
+              />
+            </div>
+            <ProviderInfo className="max-w-md" provider="xai" />
+          </div>
+        )}
       </div>
 
       {/* Footer */}
       <div className="border-white/10 border-t bg-black/50 px-4 py-4 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-2xl items-center justify-center gap-3">
-          {mode === "remove" ? (
-            <>
-              <p className="text-white/70">
-                Draw on the object you want to remove
-              </p>
-              <Button
-                className="min-w-[120px] gap-2 bg-red-500 hover:bg-red-600"
-                disabled={
-                  isProcessing || !isCanvasReady || canvasHistory.length === 0
+        {provider === "fal" ? (
+          // Fal.ai provider: Mask-based editing
+          <div className="mx-auto flex max-w-2xl items-center justify-center gap-3">
+            {mode === "remove" ? (
+              <>
+                <p className="text-white/70">
+                  Draw on the object you want to remove
+                </p>
+                <Button
+                  className="min-w-[120px] gap-2 bg-red-500 hover:bg-red-600"
+                  disabled={
+                    isProcessing || !isCanvasReady || canvasHistory.length === 0
+                  }
+                  onClick={handleSubmit}
+                >
+                  {isProcessing ? (
+                    <>
+                      <IconLoader2 className="h-4 w-4 animate-spin" />
+                      Processing…
+                    </>
+                  ) : (
+                    <>
+                      <IconSparkles className="h-4 w-4" />
+                      Remove
+                    </>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="text-white/70">
+                  Draw on the area where you want to add the object
+                </p>
+                <Button
+                  className="min-w-[120px] gap-2 bg-green-500 hover:bg-green-600"
+                  disabled={
+                    isProcessing || !isCanvasReady || canvasHistory.length === 0
+                  }
+                  onClick={handleSubmit}
+                >
+                  {isProcessing ? (
+                    <>
+                      <IconLoader2 className="h-4 w-4 animate-spin" />
+                      Processing…
+                    </>
+                  ) : (
+                    <>
+                      <IconSparkles className="h-4 w-4" />
+                      Add Object
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
+          </div>
+        ) : (
+          // xAI provider: Prompt-only editing
+          <div className="mx-auto flex max-w-2xl flex-col items-center gap-3">
+            <div className="flex w-full items-center gap-3">
+              <Input
+                className="flex-1 bg-white/10 text-white placeholder:text-white/50"
+                onChange={(e) => setObjectDescription(e.target.value)}
+                placeholder={
+                  mode === "remove"
+                    ? "Describe what to remove (e.g., 'the lamp on the table')"
+                    : "Describe what to add (e.g., 'a modern floor lamp')"
                 }
-                onClick={handleSubmit}
+                value={objectDescription}
+              />
+              <Button
+                className={cn(
+                  "min-w-[120px] gap-2",
+                  mode === "remove"
+                    ? "bg-red-500 hover:bg-red-600"
+                    : "bg-green-500 hover:bg-green-600"
+                )}
+                disabled={isProcessing || !objectDescription.trim()}
+                onClick={async () => {
+                  // For xAI, directly execute with prompt only (no mask)
+                  const prompt =
+                    mode === "remove"
+                      ? `Remove ${objectDescription.trim()} from the image and fill in the background naturally.`
+                      : `Add ${objectDescription.trim()} to the image, matching the room's style and lighting.`;
+                  await executeInpaint(undefined, prompt, mode, false);
+                }}
               >
                 {isProcessing ? (
                   <>
@@ -976,47 +1091,24 @@ export function ImageMaskEditor({
                 ) : (
                   <>
                     <IconSparkles className="h-4 w-4" />
-                    Remove
+                    {mode === "remove" ? "Remove" : "Add"}
                   </>
                 )}
               </Button>
-            </>
-          ) : (
-            <>
-              <p className="text-white/70">
-                Draw on the area where you want to add the object
-              </p>
-              <Button
-                className="min-w-[120px] gap-2 bg-green-500 hover:bg-green-600"
-                disabled={
-                  isProcessing || !isCanvasReady || canvasHistory.length === 0
-                }
-                onClick={handleSubmit}
-              >
-                {isProcessing ? (
-                  <>
-                    <IconLoader2 className="h-4 w-4 animate-spin" />
-                    Processing…
-                  </>
-                ) : (
-                  <>
-                    <IconSparkles className="h-4 w-4" />
-                    Add Object
-                  </>
-                )}
-              </Button>
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+        )}
 
         {error && (
           <p className="mt-2 text-center text-red-400 text-sm">{error}</p>
         )}
 
         <p className="mt-2 text-center text-white/50 text-xs">
-          {mode === "remove"
-            ? "The AI will fill the marked area with seamless background."
-            : "The AI will add the object matching the room's style."}
+          {provider === "fal"
+            ? mode === "remove"
+              ? "The AI will fill the marked area with seamless background."
+              : "The AI will add the object matching the room's style."
+            : "xAI uses prompt-based editing - describe your changes above."}
         </p>
       </div>
 

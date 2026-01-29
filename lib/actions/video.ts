@@ -44,6 +44,7 @@ export interface CreateVideoInput {
   musicTrackId?: string | null;
   musicVolume?: number;
   generateNativeAudio?: boolean;
+  provider?: "fal" | "xai"; // AI provider for video generation
   clips: Array<{
     sourceImageUrl: string;
     imageGenerationId?: string | null;
@@ -109,7 +110,9 @@ export async function createVideoProject(input: CreateVideoInput) {
     estimatedCost,
     thumbnailUrl: null,
     errorMessage: null,
-    metadata: {},
+    metadata: {
+      provider: input.provider ?? "fal",
+    },
     description: "",
     finalVideoUrl: null,
     durationSeconds: null,

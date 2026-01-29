@@ -83,8 +83,15 @@ export const generateVideoTask = task({
         progress: 10,
       } satisfies GenerateVideoStatus);
 
+      // Extract provider from metadata
+      const projectMetadata = videoProject.metadata as {
+        provider?: "fal" | "xai";
+      } | null;
+      const provider = projectMetadata?.provider ?? "fal";
+
       logger.info("Triggering clip generation tasks", {
         clipCount: clips.length,
+        provider,
       });
 
       // Trigger all clip generation tasks and wait for them
@@ -96,6 +103,7 @@ export const generateVideoTask = task({
               tailImageUrl: clip.endImageUrl || clip.sourceImageUrl,
               targetRoomLabel:
                 clip.roomLabel || clip.roomType.replace(/-/g, " "),
+              provider,
             },
           };
         })

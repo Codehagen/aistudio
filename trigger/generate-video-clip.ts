@@ -11,6 +11,7 @@ import {
   type KlingVideoInput,
   type KlingVideoOutput,
 } from "@/lib/fal";
+import type { AIProvider } from "@/lib/providers/types";
 import { getVideoPath, uploadVideo } from "@/lib/supabase";
 import {
   DEFAULT_NEGATIVE_PROMPT,
@@ -21,6 +22,7 @@ export interface GenerateVideoClipPayload {
   clipId: string;
   tailImageUrl?: string;
   targetRoomLabel?: string;
+  provider?: AIProvider; // Optional, defaults to "fal"
 }
 
 export interface VideoClipStatus {
@@ -45,7 +47,7 @@ export const generateVideoClipTask = task({
     factor: 2,
   },
   run: async (payload: GenerateVideoClipPayload) => {
-    const { clipId } = payload;
+    const { clipId, provider = "fal" } = payload;
 
     try {
       // Step 1: Fetch clip record
@@ -55,7 +57,7 @@ export const generateVideoClipTask = task({
         progress: 10,
       } satisfies VideoClipStatus);
 
-      logger.info("Fetching video clip record", { clipId });
+      logger.info("Fetching video clip record", { clipId, provider });
 
       const clip = await getVideoClipById(clipId);
       if (!clip) {
@@ -168,59 +170,120 @@ export const generateVideoClipTask = task({
         motionPrompt = `${motionPrompt} ${audioPrompt} ${ambientSounds}`;
       }
 
-      // Step 4: Call Kling Video API
+      // Step 4: Generate video with AI (provider routing)
       metadata.set("status", {
         step: "generating",
         label: "Generating video…",
         progress: 40,
       } satisfies VideoClipStatus);
 
-      logger.info("Calling Kling Video v2.6 Pro", {
-        clipId,
-        prompt: motionPrompt,
-        duration: clip.durationSeconds?.toString() || "5",
-        aspectRatio: videoProjectData.videoProject.aspectRatio,
-        generate_audio: generateAudio,
-      });
+      let resultVideoUrl: string;
 
-      // Prepare Kling input with proper typing
-      const klingInput: KlingVideoInput = {
-        image_url: falImageUrl,
-        tail_image_url: falTailImageUrl, // Use provided tail image or same as source
-        prompt: motionPrompt,
-        duration: (clip.durationSeconds?.toString() || "5") as "5" | "10",
-        aspect_ratio: videoProjectData.videoProject.aspectRatio as
-          | "16:9"
-          | "9:16"
-          | "1:1",
-        generate_audio: generateAudio,
-        negative_prompt: DEFAULT_NEGATIVE_PROMPT,
-      };
+      if (provider === "xai") {
+        // =========================================================
+        // xAI Provider: Video generation with polling
+        // =========================================================
+        logger.info("Using xAI provider for video generation", {
+          clipId,
+          prompt: motionPrompt,
+          duration: clip.durationSeconds || 5,
+          aspectRatio: videoProjectData.videoProject.aspectRatio,
+        });
 
-      const result = (await fal.subscribe(KLING_VIDEO_PRO, {
-        input: klingInput,
-        onQueueUpdate: (update) => {
-          logger.info("Kling processing update", { update });
-          if (update.status === "IN_PROGRESS") {
-            metadata.set("status", {
-              step: "generating",
-              label: "Generating video…",
-              progress: 50,
-            } satisfies VideoClipStatus);
+        // Import xAI functions dynamically
+        const {
+          generateVideo: xaiGenerateVideo,
+          pollVideoUntilComplete,
+          mapAspectRatioToXAI,
+        } = await import("@/lib/xai");
+
+        // Map aspect ratio to xAI format
+        const xaiAspectRatio = mapAspectRatioToXAI(
+          videoProjectData.videoProject.aspectRatio as "16:9" | "9:16" | "1:1"
+        );
+
+        // Submit video generation request
+        const submitResult = await xaiGenerateVideo({
+          prompt: motionPrompt,
+          image_url: clip.sourceImageUrl,
+          duration: clip.durationSeconds || 5,
+          aspect_ratio: xaiAspectRatio,
+        });
+
+        logger.info("xAI video generation submitted", {
+          requestId: submitResult.request_id,
+        });
+
+        // Poll for completion
+        const pollResult = await pollVideoUntilComplete(
+          submitResult.request_id,
+          {
+            onProgress: (status) => {
+              logger.info("xAI video generation progress", { status });
+              if (status.status === "processing") {
+                metadata.set("status", {
+                  step: "generating",
+                  label: "Generating video…",
+                  progress: 50,
+                } satisfies VideoClipStatus);
+              }
+            },
           }
-        },
-      })) as unknown as KlingVideoOutput;
+        );
 
-      logger.info("Kling result received", { result });
+        resultVideoUrl = pollResult.video_url;
+        logger.info("xAI video generation completed", { resultVideoUrl });
+      } else {
+        // =========================================================
+        // Fal.ai Provider: Kling Video (default)
+        // =========================================================
+        logger.info("Using Fal.ai provider for video generation", {
+          clipId,
+          prompt: motionPrompt,
+          duration: clip.durationSeconds?.toString() || "5",
+          aspectRatio: videoProjectData.videoProject.aspectRatio,
+          generate_audio: generateAudio,
+        });
 
-      // Check for result - handle both direct and wrapped response
-      const output = (result as { data?: KlingVideoOutput }).data || result;
-      if (!output.video?.url) {
-        logger.error("No video in response", { result });
-        throw new Error("No video returned from Kling API");
+        // Prepare Kling input with proper typing
+        const klingInput: KlingVideoInput = {
+          image_url: falImageUrl,
+          tail_image_url: falTailImageUrl, // Use provided tail image or same as source
+          prompt: motionPrompt,
+          duration: (clip.durationSeconds?.toString() || "5") as "5" | "10",
+          aspect_ratio: videoProjectData.videoProject.aspectRatio as
+            | "16:9"
+            | "9:16"
+            | "1:1",
+          generate_audio: generateAudio,
+          negative_prompt: DEFAULT_NEGATIVE_PROMPT,
+        };
+
+        const result = (await fal.subscribe(KLING_VIDEO_PRO, {
+          input: klingInput,
+          onQueueUpdate: (update) => {
+            logger.info("Kling processing update", { update });
+            if (update.status === "IN_PROGRESS") {
+              metadata.set("status", {
+                step: "generating",
+                label: "Generating video…",
+                progress: 50,
+              } satisfies VideoClipStatus);
+            }
+          },
+        })) as unknown as KlingVideoOutput;
+
+        logger.info("Kling result received", { result });
+
+        // Check for result - handle both direct and wrapped response
+        const output = (result as { data?: KlingVideoOutput }).data || result;
+        if (!output.video?.url) {
+          logger.error("No video in response", { result });
+          throw new Error("No video returned from Kling API");
+        }
+
+        resultVideoUrl = output.video.url;
       }
-
-      const resultVideoUrl = output.video.url;
 
       // Step 5: Save to Supabase
       metadata.set("status", {

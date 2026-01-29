@@ -11,8 +11,10 @@ import {
 import Image from "next/image";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProviderSelect } from "@/components/ui/provider-select";
 import type { VideoImageItem } from "@/hooks/use-video-creation";
 import type { MusicTrack, VideoAspectRatio } from "@/lib/db/schema";
+import type { AIProvider } from "@/lib/providers/types";
 import { cn } from "@/lib/utils";
 import { VIDEO_ROOM_TYPES } from "@/lib/video/room-sequence";
 
@@ -22,6 +24,8 @@ interface ReviewStepProps {
   onProjectNameChange: (name: string) => void;
   aspectRatio: VideoAspectRatio;
   musicTrack: MusicTrack | null;
+  provider: AIProvider;
+  onProviderChange: (provider: AIProvider) => void;
 }
 
 export function ReviewStep({
@@ -30,6 +34,8 @@ export function ReviewStep({
   onProjectNameChange,
   aspectRatio,
   musicTrack,
+  provider,
+  onProviderChange,
 }: ReviewStepProps) {
   const totalDuration = images.length * 5;
 
@@ -98,6 +104,21 @@ export function ReviewStep({
                 ? `${musicTrack.artist} • ${musicTrack.category}`
                 : "Video will have no audio"}
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* AI Provider Selection */}
+      <div className="space-y-3">
+        <Label className="font-medium text-base">AI Provider</Label>
+        <div className="flex items-center gap-4">
+          <ProviderSelect onChange={onProviderChange} value={provider} />
+          <div className="flex-1 text-muted-foreground text-sm">
+            {provider === "fal" ? (
+              <span>Fal.ai (Kling Video) - 5-10s clips</span>
+            ) : (
+              <span>xAI (Grok) - 1-15s clips</span>
+            )}
           </div>
         </div>
       </div>

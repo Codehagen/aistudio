@@ -7,6 +7,7 @@ import type {
   VideoAspectRatio,
   VideoRoomType,
 } from "@/lib/db/schema";
+import type { AIProvider } from "@/lib/providers/types";
 import {
   autoSequenceClips,
   reindexSequenceOrders,
@@ -47,6 +48,7 @@ export interface VideoCreationState {
   musicVolume: number;
   generateNativeAudio: boolean;
   isSubmitting: boolean;
+  provider: AIProvider;
 }
 
 // We'll handle the order dynamically based on template selection
@@ -91,6 +93,7 @@ export function useVideoCreation() {
     musicVolume: VIDEO_DEFAULTS.MUSIC_VOLUME,
     generateNativeAudio: VIDEO_DEFAULTS.GENERATE_NATIVE_AUDIO,
     isSubmitting: false,
+    provider: "fal",
   });
 
   const setTemplateId = React.useCallback((id: string | null) => {
@@ -329,6 +332,10 @@ export function useVideoCreation() {
     setState((prev) => ({ ...prev, isSubmitting: submitting }));
   }, []);
 
+  const setProvider = React.useCallback((newProvider: AIProvider) => {
+    setState((prev) => ({ ...prev, provider: newProvider }));
+  }, []);
+
   const goToNextStep = React.useCallback(() => {
     const stepList = state.selectedTemplateId
       ? TEMPLATE_FLOW_STEPS
@@ -408,6 +415,7 @@ export function useVideoCreation() {
       musicVolume: VIDEO_DEFAULTS.MUSIC_VOLUME,
       generateNativeAudio: VIDEO_DEFAULTS.GENERATE_NATIVE_AUDIO,
       isSubmitting: false,
+      provider: "fal",
     });
   }, [setStep]);
 
@@ -430,6 +438,7 @@ export function useVideoCreation() {
     setMusicVolume,
     setGenerateNativeAudio,
     setIsSubmitting,
+    setProvider,
     goToNextStep,
     goToPreviousStep,
     canProceed,
