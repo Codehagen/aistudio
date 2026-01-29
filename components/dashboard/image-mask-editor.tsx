@@ -757,12 +757,7 @@ export function ImageMaskEditor({
       setShowObjectRefinementDialog(true);
       return;
     }
-  }, [
-    mode,
-    objectDescription,
-    canvasHistory.length,
-    proceedWithRemoval,
-  ]);
+  }, [mode, objectDescription, canvasHistory.length, proceedWithRemoval]);
 
   // Handle confirmed object refinement
   const handleConfirmAddObject = React.useCallback(async () => {
